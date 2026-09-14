@@ -1,0 +1,15 @@
+{
+  "_comment": "Contoh bank_format_config -- lihat Technical Design Document Bagian 13. Simpan sebagai baris di tabel bank_format_configs, BUKAN hardcode di kode program.",
+  "bank_code": "RHB",
+  "sheet_name": "Sheet1",
+  "header_row": 1,
+  "column_map": {
+    "Date": "transaction_date",
+    "Transaction Type": "transaction_type",
+    "Amount": "amount_raw",
+    "Name": "raw_name",
+    "Account/Ref": "account_or_ref",
+    "Description": "description",
+    "Reference": "bank_reference"
+  }
+}

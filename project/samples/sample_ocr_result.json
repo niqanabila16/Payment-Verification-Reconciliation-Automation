@@ -1,0 +1,27 @@
+{
+  "_comment": "Contoh isi kolom ocr_results.extracted_fields dan field_confidences -- lihat Technical Design Document Bagian 8 dan 10. Ini akan dipakai mulai Phase 2 (ADR-0007).",
+  "provider": "AZURE",
+  "classification_result": {
+    "is_receipt": true,
+    "bank": "RHB",
+    "confidence": 0.97
+  },
+  "extracted_fields": {
+    "sender_name": "MOHD IKHWAN BIN MOBIN",
+    "bank": "RHB",
+    "amount": "RM708.50",
+    "reference": "1055889",
+    "transaction_datetime": "2026-09-08T14:32:00+08:00",
+    "transaction_type": "INSTANT_TRANSFER"
+  },
+  "field_confidences": {
+    "sender_name": 0.95,
+    "bank": 0.99,
+    "amount": 0.99,
+    "reference": 0.91,
+    "transaction_datetime": 0.88,
+    "transaction_type": 0.80
+  },
+  "overall_confidence": 0.92,
+  "sanitization_applied": false
+}

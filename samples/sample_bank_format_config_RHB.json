@@ -1,0 +1,15 @@
+{
+  "_comment": "Example bank_format_config -- see Technical Design Document Section 13. Store this as a row in the bank_format_configs table, NOT hardcoded in application code.",
+  "bank_code": "RHB",
+  "sheet_name": "Sheet1",
+  "header_row": 1,
+  "column_map": {
+    "Date": "transaction_date",
+    "Transaction Type": "transaction_type",
+    "Amount": "amount_raw",
+    "Name": "raw_name",
+    "Account/Ref": "account_or_ref",
+    "Description": "description",
+    "Reference": "bank_reference"
+  }
+}
