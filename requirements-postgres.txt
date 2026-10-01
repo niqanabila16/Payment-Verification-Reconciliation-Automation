@@ -1,0 +1,3 @@
+# Optional: only needed when DB_ENGINE=postgres in .env
+-r requirements.txt
+psycopg[binary]>=3.2,<4

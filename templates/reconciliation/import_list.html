@@ -1,0 +1,39 @@
+{% extends "base.html" %}{% load ui %}
+{% block title %}Bank statements{% endblock %}
+{% block topbar_title %}<strong>Bank statements</strong>{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Bank statements</h1><p>Upload the CSV or XLSX downloaded from the bank website. Matching starts automatically when the upload is accepted.</p></div></div>
+{% include "components/error_summary.html" %}
+<div class="split">
+  <section class="card">
+    <form method="post" enctype="multipart/form-data" novalidate data-upload-form>
+      {% csrf_token %}
+      <div class="card__body">
+        <p class="form-note">Fields marked * are required. The same file or the same statement date cannot be imported twice.</p>
+        {% include "components/field.html" with field=form.bank %}
+        {% include "components/field.html" with field=form.file %}
+        <details class="fold" {% if form.account_number.errors or form.statement_date.errors %}open{% endif %}><summary>Row 1 cannot be read? Enter the details manually</summary>
+          <div class="field-grid">{% include "components/field.html" with field=form.account_number %}{% include "components/field.html" with field=form.statement_date %}</div></details>
+      </div>
+      <div class="card__foot"><button class="btn btn--primary" type="submit" data-submit-btn data-loading-text="Uploading...">{% icon "upload" %} Upload and match</button></div>
+    </form>
+  </section>
+  <aside class="card"><div class="card__head"><h2>What the system does</h2></div><div class="card__body"><ul class="small stack list-plain">
+    <li>Ignores row 1 and row 3 of the file and reads the header from row 4.</li>
+    <li>Skips transactions that were already imported, even if the periods overlap.</li>
+    <li>Compares references ignoring spaces, hyphens and letter case.</li>
+    <li>Needs the amount to match to the sen. A difference always goes to review.</li>
+  </ul></div></aside>
+</div>
+<section class="card card--flush mt-1"><div class="card__head"><h2>Upload history</h2></div>
+  <div class="table-wrap"><table class="table"><thead><tr><th>File</th><th>Bank</th><th>Statement date</th><th class="num">Rows</th><th>Uploaded</th><th>Status</th></tr></thead><tbody>
+  {% for i in page.object_list %}
+    <tr><td><a href="{% url 'reconciliation:import_detail' i.pk %}">{{ i.file_name }}</a><span class="sub">Account {{ i.account_number }}</span></td><td>{{ i.bank.name }}</td><td>{{ i.statement_date|date:"d M Y" }}</td>
+      <td class="num">{{ i.row_count|default:"-" }}</td><td>{{ i.imported_at|date:"d M Y H:i" }}<span class="sub">{{ i.uploaded_by.name|default:"-" }}</span></td>
+      <td>{% if i.status == "processed" %}<span class="badge badge--success">{% icon "check-circle" %}Processed</span>{% elif i.status == "failed" %}<span class="badge badge--danger">{% icon "x-circle" %}Failed</span>{% else %}<span class="badge badge--info">{% icon "clock" %}Processing</span>{% endif %}</td></tr>
+  {% empty %}
+    <tr><td colspan="6"><div class="empty">{% icon "upload" %}<h3>No statements uploaded yet</h3><p>Choose the bank and select the file above.</p></div></td></tr>
+  {% endfor %}</tbody></table></div>
+  {% include "components/pagination.html" %}
+</section>
+{% endblock %}

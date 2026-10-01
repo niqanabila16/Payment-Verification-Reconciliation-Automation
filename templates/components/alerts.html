@@ -1,0 +1,11 @@
+{% load ui %}
+{# Django messages as accessible alerts. Errors/warnings use role=alert (announced at once); others role=status. #}
+{% for message in messages %}
+  {% with tag=message.level_tag %}
+  <div class="alert alert--{% if tag == 'error' %}danger{% else %}{{ tag }}{% endif %}" role="{% if tag == 'error' or tag == 'warning' %}alert{% else %}status{% endif %}">
+    {% if tag == 'success' %}{% icon "check-circle" %}{% elif tag == 'warning' %}{% icon "alert-triangle" %}{% elif tag == 'error' %}{% icon "x-circle" %}{% else %}{% icon "info" %}{% endif %}
+    <div><span class="alert__title">{% if tag == 'success' %}Done{% elif tag == 'warning' %}Warning{% elif tag == 'error' %}Something went wrong{% else %}Note{% endif %}</span><p>{{ message }}</p></div>
+    {% if tag != 'error' %}<button type="button" class="alert__close" data-dismiss-alert aria-label="Dismiss message">{% icon "x" %}</button>{% else %}<span></span>{% endif %}
+  </div>
+  {% endwith %}
+{% endfor %}

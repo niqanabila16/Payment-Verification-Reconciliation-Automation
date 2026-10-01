@@ -1,0 +1,42 @@
+{% extends "base.html" %}{% load ui %}
+{% block title %}New receipt{% endblock %}
+{% block topbar_title %}<strong>New receipt</strong>{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>New receipt</h1><p>Record a customer payment exactly as shown on the proof of payment. Finance checks it against the bank statement.</p></div>
+</div>
+{% if not branch %}
+  <div class="alert alert--danger" role="alert">{% icon "x-circle" %}<div><span class="alert__title">Your account has no branch</span><p>Receipts need a branch. Ask an administrator to assign your branch, then reload this page.</p></div><span></span></div>
+{% else %}
+<div class="split">
+  <div class="stack">
+    <div data-flash aria-live="polite"></div>
+    {# Offline queue: filled by app.js when receipts are saved on this device while the server cannot be reached #}
+    <section class="card queue-card hidden" data-queue-card aria-live="polite">
+      <div class="card__body">
+        <h2>{% icon "wifi-off" %} <span data-queue-title>Waiting to sync</span></h2>
+        <p class="small mb-0" data-queue-help>These receipts are saved on this computer and will be sent automatically when the connection to the central computer is back. Do not clear your browser data until they are synced.</p>
+        <ul class="queue-list" data-queue-list></ul>
+      </div>
+    </section>
+    <section class="card" id="receipt-card" data-receipt-card data-post-url="{% url 'receipts:new' %}">
+      {% include "receipts/_form.html" %}
+    </section>
+  </div>
+  <aside class="card">
+    <div class="card__head"><h2>Recent receipts</h2><a class="btn btn--sm btn--quiet" href="{% url 'receipts:list' %}">View all</a></div>
+    {% if recent %}
+      <div class="table-wrap"><table class="table"><tbody>
+      {% for r in recent %}
+        <tr><td><a href="{% url 'receipts:detail' r.pk %}" class="ref">{{ r.bank_reference_no }}</a><span class="sub">{{ r.sender_name }}</span></td>
+            <td class="num">{{ r.amount|money }}<span class="sub">{% status_badge r.match.match_status %}</span></td></tr>
+      {% endfor %}
+      </tbody></table></div>
+    {% else %}
+      <div class="empty">{% icon "file-text" %}<h3>No receipts yet</h3><p>Receipts you save appear here with their verification status.</p></div>
+    {% endif %}
+  </aside>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}{% load static %}<script src="{% static 'js/receipts.js' %}" defer></script>{% endblock %}

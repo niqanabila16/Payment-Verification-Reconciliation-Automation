@@ -1,0 +1,13 @@
+{# One shared confirmation dialog. Any button with data-confirm-* attributes opens it (see app.js). #}
+<dialog class="dialog" id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+  <form method="dialog">
+    <div class="dialog__body">
+      <h2 id="confirm-title">Are you sure?</h2>
+      <p id="confirm-message" class="muted mt-1"></p>
+    </div>
+    <div class="dialog__foot">
+      <button class="btn" value="cancel" autofocus>Cancel</button>
+      <button class="btn btn--primary" value="confirm" id="confirm-ok">Confirm</button>
+    </div>
+  </form>
+</dialog>

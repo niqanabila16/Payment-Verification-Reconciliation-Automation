@@ -1,0 +1,54 @@
+{% extends "base.html" %}{% load ui %}
+{% block title %}Reconciliation{% endblock %}
+{% block topbar_title %}<strong>Reconciliation</strong>{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Reconciliation</h1><p>Teller receipts compared with bank statements. Work from the oldest item first so nothing waits too long.</p></div>
+  {% if user.role == "finance" %}
+  <div class="page-head__actions">
+    <form method="post" action="{% url 'reconciliation:rerun' %}">{% csrf_token %}<button class="btn" type="submit">{% icon "refresh" %} Re-run matching</button></form>
+    <a class="btn btn--primary" href="{% url 'reconciliation:import_list' %}">{% icon "upload" %} Upload bank statement</a>
+  </div>
+  {% endif %}
+</div>
+
+<div class="grid grid--kpi">
+  <div class="card kpi kpi--warning"><span class="kpi__label">{% icon "alert-triangle" %} Needs attention</span><span class="kpi__value">{{ kpis.needs_attention }}</span><span class="kpi__note">Typo, manual review or not found</span></div>
+  <div class="card kpi kpi--danger"><span class="kpi__label">{% icon "x-circle" %} Not found</span><span class="kpi__value">{{ kpis.unmatched }}</span><span class="kpi__note">No bank row yet</span></div>
+  <div class="card kpi kpi--success"><span class="kpi__label">{% icon "check-circle" %} Verified (GFP)</span><span class="kpi__value">{{ kpis.verified }}</span><span class="kpi__note">Matched to the bank</span></div>
+  <div class="card kpi"><span class="kpi__label">{% icon "clock" %} Older than 1 month</span><span class="kpi__value">{{ kpis.aged }}</span><span class="kpi__note">Automatic re-check has stopped</span></div>
+</div>
+
+<div class="card card--flush">
+  <nav class="tabs" aria-label="Queue views">
+    {% for key, label, count in tabs %}<a href="{% querystring tab=key page=None %}" {% if key == tab %}aria-current="page"{% endif %}>{{ label }} <span class="count">{{ count }}</span></a>{% endfor %}
+  </nav>
+  <form class="filters" method="get" role="search">
+    <input type="hidden" name="tab" value="{{ tab }}">
+    <label class="visually-hidden" for="q">Search</label>
+    <input class="input input--grow" id="q" name="q" type="search" value="{{ q }}" placeholder="Search by reference or name">
+    <label class="visually-hidden" for="branch">Branch</label>
+    <select class="input" id="branch" name="branch"><option value="">All branches</option>{% for b in branches %}<option value="{{ b.pk }}" {% if b.pk|stringformat:"s" == branch %}selected{% endif %}>{{ b.code }}</option>{% endfor %}</select>
+    <button class="btn btn--sm" type="submit">{% icon "search" %} Apply</button>
+  </form>
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th>Reference</th><th>Reported by</th><th class="num">Amount</th><th>Bank</th><th>Waiting since</th><th>Status</th><th><span class="visually-hidden">Open</span></th></tr></thead>
+    <tbody>
+    {% for m in page.object_list %}
+      {% with s=m.teller_submission %}
+      <tr {% if m.aged %}class="row-aged"{% endif %}>
+        <td><a class="ref" href="{% url 'reconciliation:detail' m.pk %}">{{ s.bank_reference_no }}</a><span class="sub">#{{ s.pk }} - {{ s.get_payment_method_code_display }}</span></td>
+        <td>{{ s.sender_name }}<span class="sub">{{ s.branch.code }} - {{ s.submitted_by.name|default:"-" }}</span></td>
+        <td class="num">{{ s.amount|money }}</td><td>{{ s.bank.name }}</td>
+        <td>{{ m.first_seen_at|date:"d M Y H:i" }}{% if m.aged %}<span class="sub">Over 1 month old</span>{% endif %}</td>
+        <td>{% status_badge m.match_status %}{% if m.match_score and m.match_status == "typo" %}<span class="sub">{{ m.match_score|floatformat:0 }}% similar</span>{% endif %}</td>
+        <td><a class="btn btn--sm" href="{% url 'reconciliation:detail' m.pk %}">Review {% icon "arrow-right" %}</a></td>
+      </tr>
+      {% endwith %}
+    {% empty %}
+      <tr><td colspan="7"><div class="empty">{% icon "check-circle" %}<h3>{% if tab == "attention" or tab == "review" or tab == "unmatched" %}Nothing needs attention{% else %}No items here{% endif %}</h3><p>{% if q or branch %}No items match your search. Clear the filters to see everything.{% else %}Upload a bank statement to start matching, or wait for Tellers to submit receipts.{% endif %}</p></div></td></tr>
+    {% endfor %}
+    </tbody></table></div>
+  {% include "components/pagination.html" %}
+</div>
+{% endblock %}

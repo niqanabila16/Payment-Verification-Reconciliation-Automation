@@ -1,0 +1,37 @@
+{% extends "base.html" %}{% load ui %}
+{% block title %}Receipt #{{ sub.pk }}{% endblock %}
+{% block topbar_title %}<strong>Receipt #{{ sub.pk }}</strong>{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Receipt #{{ sub.pk }}</h1><p><span class="ref">{{ sub.bank_reference_no }}</span> - {{ sub.amount|money }}</p></div>
+  <div class="page-head__actions">{% status_badge match.match_status %}{% if can_edit %}<a class="btn btn--primary" href="{% url 'receipts:edit' sub.pk %}">{% icon "edit" %} Correct receipt</a>{% endif %}</div></div>
+
+{% if match.match_status == "typo" or match.match_status == "manual_review" %}
+  <div class="alert alert--warning" role="status">{% icon "alert-triangle" %}<div><span class="alert__title">Finance is reviewing this receipt</span><p>The system found a similar bank entry but the reference or amount is not identical. Check the proof of payment; if you made a typing mistake, tell Finance in the comments below.</p></div><span></span></div>
+{% elif match.match_status == "not_found" %}
+  <div class="alert alert--danger" role="status">{% icon "x-circle" %}<div><span class="alert__title">Not found in the bank statement yet</span><p>The system keeps checking every new statement for about one month. Customers sometimes confirm late. Re-check the reference on the proof of payment and add a comment if you find a mistake.</p></div><span></span></div>
+{% elif match.match_status == "closed" %}
+  <div class="alert alert--info" role="status">{% icon "lock" %}<div><span class="alert__title">Closed by Finance</span><p>{{ match.closed_reason }}</p></div><span></span></div>
+{% elif match.match_status == "gfp" %}
+  <div class="alert alert--success" role="status">{% icon "check-circle" %}<div><span class="alert__title">Verified</span><p>The payment was found in the bank statement. Nothing more to do.</p></div><span></span></div>
+{% endif %}
+
+<div class="split">
+  <section class="card"><div class="card__head"><h2>Receipt details</h2></div><div class="card__body">
+    <dl class="meta">
+      <dt>Branch</dt><dd>{{ sub.branch.code }}</dd>
+      <dt>Reported by</dt><dd>{{ sub.submitted_by.name|default:"-" }}</dd>
+      <dt>Sender</dt><dd>{{ sub.sender_name }}</dd>
+      <dt>Account holder</dt><dd>{{ sub.account_holder_name }}</dd>
+      <dt>Relationship</dt><dd>{{ sub.get_relationship_display|default:"-" }}</dd>
+      <dt>Bank</dt><dd>{{ sub.bank.name }}</dd>
+      <dt>Payment method</dt><dd>{{ sub.get_payment_method_code_display }}</dd>
+      <dt>Reference</dt><dd class="ref">{{ sub.bank_reference_no }}</dd>
+      <dt>Amount</dt><dd>{{ sub.amount|money }}</dd>
+      <dt>Entered</dt><dd>{{ sub.entered_at|date:"d M Y H:i" }}</dd>
+      <dt>Reached the server</dt><dd>{{ sub.synced_at|date:"d M Y H:i"|default:"-" }}</dd>
+    </dl></div></section>
+  <section class="card"><div class="card__head"><h2>{% icon "message" %} Discussion with Finance</h2></div><div class="card__body">
+    {% include "reconciliation/_thread.html" with action_url_name="reconciliation:comment" %}
+  </div></section>
+</div>
+{% endblock %}

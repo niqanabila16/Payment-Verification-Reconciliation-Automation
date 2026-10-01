@@ -1,0 +1,10 @@
+{% load ui %}
+{# One form field: label above, hint, error (text + icon), then the control. Required fields get an asterisk. #}
+{% with key=field.auto_id|slice:"3:" %}
+<div class="field">
+  <label class="field__label" for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %}<span class="field__req" aria-hidden="true">*</span><span class="visually-hidden"> (required)</span>{% endif %}</label>
+  {% if field.help_text %}<div class="field__hint" id="hint-{{ key }}">{{ field.help_text }}</div>{% endif %}
+  {% if field.errors %}<div class="field__error" id="error-{{ key }}">{% icon "x-circle" %}<span><span class="visually-hidden">Error: </span>{{ field.errors.0 }}</span></div>{% endif %}
+  {{ field }}
+</div>
+{% endwith %}

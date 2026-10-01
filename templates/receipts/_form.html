@@ -1,0 +1,23 @@
+{% load ui %}
+{# The receipt form. Rendered on the page and, after a failed AJAX submit, re-rendered by the server (JSON "html"). #}
+<form method="post" id="receipt-form" novalidate {% if not editing %}data-receipt-form{% endif %} data-ref-min="{{ REFERENCE_MIN }}" data-ref-max="{{ REFERENCE_MAX }}">
+  {% csrf_token %}
+  {% include "components/error_summary.html" %}
+  <div class="card__body">
+    <p class="form-note">Fields marked * are required. Branch <strong>{{ branch.code }}</strong> is added automatically from your sign-in.</p>
+    {{ form.client_uuid }}{{ form.entered_at }}
+    <div class="field-grid">
+      {% include "components/field.html" with field=form.sender_name %}
+      {% include "components/field.html" with field=form.account_holder_name %}
+      {% include "components/field.html" with field=form.relationship %}
+      {% include "components/field.html" with field=form.payment_method_code %}
+      {% include "components/field.html" with field=form.bank %}
+      {% include "components/field.html" with field=form.amount %}
+    </div>
+    {% include "components/field.html" with field=form.bank_reference_no %}
+  </div>
+  <div class="card__foot">
+    {% if editing %}<a class="btn" href="{% url 'receipts:detail' sub.pk %}">Cancel</a>{% else %}<button class="btn" type="reset" data-reset-form>Clear form</button>{% endif %}
+    <button class="btn btn--primary" type="submit" data-submit-btn>{% icon "check-circle" %} {% if editing %}Save correction{% else %}Save receipt{% endif %}</button>
+  </div>
+</form>

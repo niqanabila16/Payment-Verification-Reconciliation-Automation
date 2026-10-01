@@ -1,0 +1,112 @@
+{% extends "base.html" %}{% load ui %}
+{% block title %}Item #{{ match.pk }}{% endblock %}
+{% block topbar_title %}<strong>Reconciliation item #{{ match.pk }}</strong>{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><p class="xs mb-0"><a href="{% url 'reconciliation:queue' %}">Reconciliation</a> / item #{{ match.pk }}</p>
+    <h1><span class="ref">{{ sub.bank_reference_no }}</span> - {{ sub.amount|money }}</h1>
+    <p>Reported by {{ sub.submitted_by.name|default:"-" }} (branch {{ sub.branch.code }}) on {{ sub.entered_at|date:"d M Y H:i" }}.</p></div>
+  <div class="page-head__actions">{% status_badge match.match_status %}{% if match.is_aged and match.is_open %}<span class="badge badge--warning">{% icon "clock" %}Over 1 month old</span>{% endif %}</div>
+</div>
+
+{% if match.notes %}<div class="alert alert--{% if match.match_status == 'gfp' %}success{% elif match.match_status == 'not_found' %}danger{% elif match.match_status == 'closed' %}info{% else %}warning{% endif %}" role="status">{% icon "info" %}<div><span class="alert__title">Why this status</span><p>{{ match.notes }}</p></div><span></span></div>{% endif %}
+{% if match.match_status == "closed" %}<div class="alert alert--info" role="status">{% icon "lock" %}<div><span class="alert__title">Closed</span><p>{{ match.closed_reason }}</p></div><span></span></div>{% endif %}
+
+{% if rows %}
+<section class="card mb-1" aria-labelledby="cmp-title">
+  <div class="card__head"><h2 id="cmp-title">Teller report vs bank statement{% if not match.bank_statement_entry %} <span class="muted small">(suggested row)</span>{% endif %}</h2>
+    <div class="legend"><span><i class="swatch swatch--same"></i>Identical</span><span><i class="swatch swatch--diff"></i>Different</span><span><i class="swatch swatch--info"></i>For information</span></div></div>
+  <div class="table-wrap"><table class="compare">
+    <thead><tr><th scope="col">Field</th><th scope="col">Teller report</th><th scope="col">Bank statement{% if entry.source_row %} (row {{ entry.source_row }}){% endif %}</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr class="is-{{ r.state }}">
+        <th scope="row">{{ r.label }}</th>
+        {% if r.kind == "reference" %}
+          {% ref_diff r.teller r.bank as d %}
+          <td><span class="big">{{ d.left }}</span><span class="compare__hint">As typed: {{ r.teller_raw }}</span></td>
+          <td><span class="big">{{ d.right }}</span><span class="compare__hint">As in bank file: {{ r.bank_raw }}</span>
+        {% elif r.kind == "amount" %}
+          <td class="big">{{ r.teller|money }}</td><td><span class="big">{{ r.bank|money }}</span>
+        {% else %}
+          <td>{{ r.teller }}</td><td>{{ r.bank }}
+        {% endif %}
+          {% if r.state == "diff" %}<span class="compare__flag">{% icon "x-circle" %} Differs{% if r.hint %}: {{ r.hint }}{% endif %}</span>
+          {% elif r.state == "same" %}<span class="compare__flag compare__flag--ok">{% icon "check-circle" %} Identical</span>
+          {% elif r.hint %}<span class="compare__hint">{{ r.hint }}</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody></table></div>
+</section>
+{% elif match.is_open %}
+<section class="card mb-1"><div class="empty">{% icon "search" %}<h3>No bank row linked yet</h3><p>The engine checks every new statement for about one month after the receipt was reported. You can also link a row yourself below.</p></div></section>
+{% endif %}
+
+<div class="split">
+  <div class="stack">
+    <section class="card"><div class="card__head"><h2>{% icon "message" %} Discussion with the teller</h2></div><div class="card__body">
+      {% include "reconciliation/_thread.html" %}</div></section>
+    {% if candidates and can_act %}
+    <section class="card card--flush"><div class="card__head"><h2>Candidate bank rows</h2><span class="muted small">Unlinked credits of {{ sub.bank.name }}, best match first</span></div>
+      <div class="table-wrap"><table class="table"><thead><tr><th>Bank reference</th><th>Counterparty</th><th class="num">Credit</th><th>Statement</th><th><span class="visually-hidden">Link</span></th></tr></thead><tbody>
+      {% for c in candidates %}
+        <tr><td><span class="ref">{{ c.entry.reference_1|default:c.entry.bank_ref_no }}</span><span class="sub">{{ c.ref_score }}% similar - {{ c.entry.bank_ref_no }}</span></td>
+            <td>{{ c.entry.counterparty_name|default:"-" }}</td>
+            <td class="num">{{ c.entry.credit_amount|money }}{% if c.same_amount %}<span class="sub">Same amount</span>{% else %}<span class="sub">Different amount</span>{% endif %}</td>
+            <td>{{ c.entry.statement_import.statement_date|date:"d M Y" }}</td>
+            <td><form method="post" action="{% url 'reconciliation:link' match.pk %}" class="flex">{% csrf_token %}<input type="hidden" name="entry_id" value="{{ c.entry.pk }}">
+              <label class="visually-hidden" for="link-note-{{ c.entry.pk }}">Reason for linking</label>
+              <input class="input" id="link-note-{{ c.entry.pk }}" name="note" required placeholder="Reason for linking" maxlength="500">
+              <button class="btn btn--sm" type="submit" data-confirm-title="Link this bank row?" data-confirm-message="The receipt becomes verified (GFP) and the teller is notified. This cannot be undone from this screen." data-confirm-label="Link and verify">{% icon "link" %} Link</button></form></td></tr>
+      {% endfor %}
+      </tbody></table></div></section>
+    {% endif %}
+  </div>
+
+  <div class="stack">
+    {% if can_act and match.is_open %}
+    <section class="card"><div class="card__head"><h2>Decide</h2></div><div class="card__body">
+      {% if match.suggested_bank_statement_entry_id %}
+      <div class="action-block"><h3>Approve the suggestion</h3>
+        <p class="small muted">{% if has_diff %}The amounts or references differ. Explain why you accept it.{% else %}Everything matches. A note is optional.{% endif %}</p>
+        <form method="post" action="{% url 'reconciliation:confirm' match.pk %}" novalidate>{% csrf_token %}
+          <div class="field"><label class="field__label" for="confirm-note">Note{% if has_diff %}<span class="field__req" aria-hidden="true">*</span>{% endif %}</label><textarea class="input input--textarea" id="confirm-note" name="note" rows="2" maxlength="500" {% if has_diff %}required{% endif %}></textarea></div>
+          <button class="btn btn--primary" type="submit" data-confirm-title="Approve and verify?" data-confirm-message="The receipt becomes verified (GFP) and the teller is notified." data-confirm-label="Approve">{% icon "check-circle" %} Approve (GFP)</button>
+        </form></div>
+      {% endif %}
+      {% if match.match_status == "typo" or match.match_status == "manual_review" %}
+      <div class="action-block"><h3>Ask the teller to correct it</h3>
+        <form method="post" action="{% url 'reconciliation:feedback' match.pk %}" novalidate>{% csrf_token %}
+          <div class="field"><label class="field__label" for="fb-msg">What should be corrected?<span class="field__req" aria-hidden="true">*</span></label><textarea class="input input--textarea" id="fb-msg" name="message" rows="2" required maxlength="500" placeholder="e.g. Reference on the proof of payment ends with 45, not 54"></textarea></div>
+          <button class="btn" type="submit">{% icon "message" %} Send feedback</button>
+        </form></div>
+      <div class="action-block"><h3>The suggestion is wrong</h3>
+        <form method="post" action="{% url 'reconciliation:reject' match.pk %}" novalidate>{% csrf_token %}
+          <div class="field"><label class="field__label" for="rej-note">Reason<span class="field__req" aria-hidden="true">*</span></label><input class="input" id="rej-note" name="note" required maxlength="500"></div>
+          <button class="btn" type="submit" data-confirm-title="Reject the suggestion?" data-confirm-message="The item goes back to Not found and the engine keeps looking." data-confirm-label="Reject suggestion">{% icon "x-circle" %} Reject suggestion</button>
+        </form></div>
+      {% endif %}
+      <div class="action-block"><details class="fold"><summary>Other actions</summary>
+        <h3>Move to another branch</h3>
+        <form method="post" action="{% url 'reconciliation:reassign' match.pk %}" class="flex mb-1">{% csrf_token %}
+          <label class="visually-hidden" for="reassign-branch">Branch</label>{{ reassign_form.branch }}
+          <button class="btn btn--sm" type="submit">Move</button></form>
+        <h3>Close without a match</h3>
+        <form method="post" action="{% url 'reconciliation:close' match.pk %}" novalidate>{% csrf_token %}
+          <div class="field"><label class="field__label" for="close-reason">Reason<span class="field__req" aria-hidden="true">*</span></label><span class="field__hint">At least 10 characters. Kept in the audit trail.</span><textarea class="input input--textarea" id="close-reason" name="reason" rows="2" required minlength="10" maxlength="500"></textarea></div>
+          <button class="btn btn--danger btn--sm" type="submit" data-confirm-title="Close this item?" data-confirm-message="Closed items are no longer matched automatically. The teller is notified with your reason." data-confirm-label="Close item" data-confirm-tone="danger">{% icon "lock" %} Close item</button>
+        </form></details></div>
+    </div></section>
+    {% elif not can_act %}
+    <div class="alert alert--info" role="status">{% icon "info" %}<div><span class="alert__title">Read-only</span><p>Administrators can view reconciliation items but only Finance can decide on them.</p></div><span></span></div>
+    {% endif %}
+    <section class="card"><div class="card__head"><h2>Details</h2></div><div class="card__body"><dl class="meta">
+      <dt>Sender</dt><dd>{{ sub.sender_name }}</dd><dt>Account holder</dt><dd>{{ sub.account_holder_name }}</dd>
+      <dt>Relationship</dt><dd>{{ sub.get_relationship_display|default:"-" }}</dd><dt>Method</dt><dd>{{ sub.get_payment_method_code_display }}</dd>
+      <dt>First seen</dt><dd>{{ match.first_seen_at|date:"d M Y H:i" }}</dd><dt>Checks so far</dt><dd>{{ match.attempt_count }}{% if match.last_attempt_at %} (last {{ match.last_attempt_at|date:"d M H:i" }}){% endif %}</dd>
+      {% if match.matched_by %}<dt>Decided by</dt><dd>{{ match.matched_by.name }}</dd>{% endif %}
+    </dl></div></section>
+  </div>
+</div>
+{% endblock %}

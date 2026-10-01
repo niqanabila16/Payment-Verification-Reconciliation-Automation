@@ -1,0 +1,12 @@
+{% if page.paginator.count %}
+<div class="pager">
+  <span>Showing {{ page.start_index }}-{{ page.end_index }} of {{ page.paginator.count }}</span>
+  {% if page.paginator.num_pages > 1 %}
+  <nav aria-label="Pagination">
+    {% if page.has_previous %}<a class="btn btn--sm" href="{% querystring page=page.previous_page_number %}">Previous</a>{% endif %}
+    <span class="btn btn--sm btn--quiet" aria-current="page">Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+    {% if page.has_next %}<a class="btn btn--sm" href="{% querystring page=page.next_page_number %}">Next</a>{% endif %}
+  </nav>
+  {% endif %}
+</div>
+{% endif %}

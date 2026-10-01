@@ -1,0 +1,28 @@
+{% extends "base.html" %}{% load static ui %}
+{% block title %}Software architecture{% endblock %}
+{% block topbar_title %}<strong>Software architecture</strong>{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Software architecture</h1><p>How the pieces of this system fit together. Solid arrows are automatic data flows; the dashed arrow is a manual step by a person (the bank offers no API we may use).</p></div></div>
+<div class="arch"><img src="{% static 'img/architecture.svg' %}" alt="Architecture diagram. Teller, Finance and Admin use the browser front end built with Django templates, vanilla JavaScript and a service worker. It talks over HTTPS to the Django back end, which contains the matching engine and a background import thread. The back end stores data in SQLite or PostgreSQL, uses a local memory cache, and optionally sends e-mail through SMTP. Finance downloads bank statements by hand from the bank website and uploads them."></div>
+<div class="grid grid--2 mt-1">
+  <section class="card detail-card detail-card--fe"><div class="card__body"><h3>Frontend details</h3><ul>
+    <li>{% icon "check-circle" %}<span>Django templates render every page on the server, so pages load fast on branch computers.</span></li>
+    <li>{% icon "check-circle" %}<span>Vanilla JavaScript (no build step) for the progress bar, the offline receipt queue and notifications.</span></li>
+    <li>{% icon "check-circle" %}<span>Service worker caches the Teller form so receipts can be captured while the central computer is off.</span></li>
+    <li>{% icon "check-circle" %}<span>One CSS file with design tokens; WCAG 2.2 AA colours, labels, focus and error handling.</span></li></ul></div></section>
+  <section class="card detail-card detail-card--be"><div class="card__body"><h3>Backend details</h3><ul>
+    <li>{% icon "check-circle" %}<span>Python 3.12 and Django 5.2 LTS: ORM, authentication, CSRF and sessions built in.</span></li>
+    <li>{% icon "check-circle" %}<span>Matching engine: deterministic rules plus RapidFuzz for typo tolerance (no machine learning decides).</span></li>
+    <li>{% icon "check-circle" %}<span>Statement parser reads CSV or XLSX; header on row 4, rows 1 and 3 ignored.</span></li>
+    <li>{% icon "check-circle" %}<span>Background thread processes uploads and reports progress; Redis + RQ is the planned upgrade path.</span></li></ul></div></section>
+  <section class="card detail-card detail-card--db"><div class="card__body"><h3>Resource details</h3><ul>
+    <li>{% icon "check-circle" %}<span>SQLite for zero-setup local use; PostgreSQL for production (same schema through Django migrations).</span></li>
+    <li>{% icon "check-circle" %}<span>Append-only audit log: updates and deletes are blocked in code.</span></li>
+    <li>{% icon "check-circle" %}<span>Local memory cache for sign-in throttling; no external service needed.</span></li>
+    <li>{% icon "check-circle" %}<span>Optional SMTP e-mail digest; no WhatsApp or Microsoft products are involved.</span></li></ul></div></section>
+  <section class="card detail-card"><div class="card__body"><h3>Constraints that shaped it</h3><ul>
+    <li>{% icon "check-circle" %}<span>No direct bank API: Finance downloads the statement manually and uploads it.</span></li>
+    <li>{% icon "check-circle" %}<span>Central computer is off at night: Tellers queue receipts in the browser and sync later.</span></li>
+    <li>{% icon "check-circle" %}<span>Zero-cost dependencies: only open-source libraries, no paid services.</span></li></ul></div></section>
+</div>
+{% endblock %}

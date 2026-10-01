@@ -1,0 +1,43 @@
+{% load static ui %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in | Payment Reconciliation</title>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  <link rel="icon" href="{% static 'img/favicon.svg' %}" type="image/svg+xml">
+</head>
+<body>
+  {% include "components/icons.html" %}
+  <div class="auth">
+    <section class="auth__aside" aria-label="About this system">
+      <div class="brand"><span class="brand__mark">{% icon "scale" %}</span><span>Reconcile<small>Payment verification</small></span></div>
+      <div>
+        <h2>Every customer payment checked against the bank, the same day.</h2>
+        <ol class="flow">
+          <li><span><strong>Teller reports the payment</strong>Structured receipt, even when the office computer is off.</span></li>
+          <li><span><strong>Finance uploads the bank statement</strong>The system matches references and amounts.</span></li>
+          <li><span><strong>Exceptions are resolved in one place</strong>Typos, differences and missing payments, with a comment thread.</span></li>
+        </ol>
+      </div>
+      <p class="xs">Internal use only. All sign-ins and changes are recorded.</p>
+    </section>
+    <main class="auth__form" id="main">
+      <form method="post" novalidate>
+        {% csrf_token %}
+        <h1>Sign in</h1>
+        <p class="muted">Use the email address and password given to you by an administrator.</p>
+        {% include "components/alerts.html" %}
+        {% if form.non_field_errors %}
+          <div class="alert alert--danger" role="alert" tabindex="-1" data-focus-on-load>{% icon "x-circle" %}<div><span class="alert__title">Could not sign you in</span><p>{{ form.non_field_errors.0 }}</p></div><span></span></div>
+        {% endif %}
+        {% include "components/field.html" with field=form.username %}
+        {% include "components/field.html" with field=form.password %}
+        <input type="hidden" name="next" value="{{ next }}">
+        <button class="btn btn--primary btn--block" type="submit">Sign in</button>
+        <p class="form-note mt-1">{% icon "key" %} Forgot your password? Ask an administrator to reset it. Passwords cannot be changed on this website.</p>
+      </form>
+    </main>
+  </div>
+  <script src="{% static 'js/app.js' %}" defer></script>
+</body>
+</html>
