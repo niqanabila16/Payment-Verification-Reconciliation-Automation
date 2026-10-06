@@ -10,6 +10,7 @@ class Branch(models.Model):
 
     code = models.CharField(max_length=10, unique=True, help_text="Short code, e.g. KJ.")
     name = models.CharField(max_length=100, blank=True)
+    is_active = models.BooleanField(default=True, help_text="Inactive branches are hidden from dropdowns; history is kept.")
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
@@ -97,3 +98,18 @@ class User(AbstractBaseUser, PermissionsMixin):
             Role.FINANCE: "reconciliation:queue",
             Role.ADMIN: "accounts:user_list",
         }[self.role]
+
+
+class PasswordResetRequest(models.Model):
+    """
+    "Forgot password": Teller/Finance cannot change their own password, so they send a request and an
+    Admin resets it. One open request per user (no spam); handled_at is set when the Admin resets the password.
+    """
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reset_requests")
+    created_at = models.DateTimeField(default=timezone.now)
+    handled_at = models.DateTimeField(null=True, blank=True)
+    handled_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+
+    class Meta:
+        ordering = ["created_at"]

@@ -4,7 +4,6 @@
 <div class="card"><div class="empty">
   {% icon "lock" %}
   <h3>You do not have access to this page</h3>
-  <p>Your role ({{ user.get_role_display }}) cannot open it. If you need access, ask an administrator to change your role.</p>
   <a class="btn btn--primary" href="{% url 'core:home_redirect' %}">Go to my start page</a>
 </div></div>
 {% endblock %}

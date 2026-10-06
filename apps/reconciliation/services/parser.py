@@ -29,6 +29,10 @@ class StatementParseError(Exception):
     """Raised with a user-readable message when the file cannot be used."""
 
 
+class Row1UnreadableError(StatementParseError):
+    """Row 1 has no readable account number / date. The upload form then asks for them manually."""
+
+
 # canonical field -> accepted normalized header names
 HEADER_ALIASES = {
     "description": {"description"},
@@ -158,10 +162,9 @@ def parse_statement(data: bytes, filename: str, fallback_account: str = "",
     account = account or fallback_account.strip()
     when = when or fallback_date
     if not account or not when:
-        raise StatementParseError(
-            "Row 1 of the file could not be read for the account number or statement date. "
-            "Expected text like 'Balance of Account 1234567890 / Mandiri - Cust Ac as at 30/09/2026'. "
-            "Enter the account number and statement date manually in the upload form and try again.")
+        raise Row1UnreadableError(
+            "Row 1 has no readable account number or statement date (expected: 'Balance of Account 1234567890 / "
+            "Mandiri - Cust Ac as at 30/09/2026'). Enter both below and upload again.")
 
     mapping = _map_headers(rows[header_index])
     missing = [FIELD_LABELS[f] for f in REQUIRED_FIELDS if f not in mapping]

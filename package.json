@@ -1,0 +1,27 @@
+{
+  "name": "payment-reconciliation",
+  "version": "1.0.0",
+  "description": "Web application that checks customer payments reported by branch **Tellers** against the **bank statements** downloaded by **Finance**, flags typos and differences, and keeps an audit trail.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/niqanabila16/Payment-Verification-Reconciliation-Automation.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/niqanabila16/Payment-Verification-Reconciliation-Automation/issues"
+  },
+  "homepage": "https://github.com/niqanabila16/Payment-Verification-Reconciliation-Automation#readme",
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "tailwindcss": "^4.3.3"
+  }
+}

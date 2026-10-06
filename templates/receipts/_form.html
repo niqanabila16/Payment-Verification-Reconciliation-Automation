@@ -1,10 +1,9 @@
 {% load ui %}
 {# The receipt form. Rendered on the page and, after a failed AJAX submit, re-rendered by the server (JSON "html"). #}
-<form method="post" id="receipt-form" novalidate {% if not editing %}data-receipt-form{% endif %} data-ref-min="{{ REFERENCE_MIN }}" data-ref-max="{{ REFERENCE_MAX }}">
+<form method="post" id="receipt-form" novalidate {% if not editing %}data-receipt-form{% endif %}>
   {% csrf_token %}
   {% include "components/error_summary.html" %}
   <div class="card__body">
-    <p class="form-note">Fields marked * are required. Branch <strong>{{ branch.code }}</strong> is added automatically from your sign-in.</p>
     {{ form.client_uuid }}{{ form.entered_at }}
     <div class="field-grid">
       {% include "components/field.html" with field=form.sender_name %}

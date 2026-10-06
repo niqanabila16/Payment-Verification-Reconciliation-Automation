@@ -1,8 +1,7 @@
 {% extends "base.html" %}{% load ui %}
-{% block title %}Branch receipts{% endblock %}
-{% block topbar_title %}<strong>My branch receipts</strong>{% endblock %}
+{% block title %}Receipts{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>My branch receipts</h1><p>Every receipt reported for your branch and what Finance found in the bank statement.</p></div>
+<div class="page-head"><h1>Receipts</h1>
   <div class="page-head__actions"><a class="btn btn--primary" href="{% url 'receipts:new' %}">{% icon "plus" %} New receipt</a></div></div>
 <div class="card card--flush">
   <form class="filters" method="get" role="search">
@@ -17,11 +16,11 @@
     <tbody>
     {% for r in page.object_list %}
       <tr><td><a class="ref" href="{% url 'receipts:detail' r.pk %}">{{ r.bank_reference_no }}</a><span class="sub">#{{ r.pk }}</span></td>
-          <td>{{ r.sender_name }}<span class="sub">{{ r.get_payment_method_code_display }}</span></td>
+          <td>{{ r.sender_name }}<span class="sub">{{ r.payment_method_code|payment_method_label }}</span></td>
           <td class="num">{{ r.amount|money }}</td><td>{{ r.bank.name }}</td>
-          <td>{{ r.entered_at|date:"d M Y H:i" }}</td><td>{% status_badge r.match.match_status %}</td></tr>
+          <td>{{ r.entered_at|date:"d M Y H:i" }}</td><td>{% teller_badge r.match.match_status %}</td></tr>
     {% empty %}
-      <tr><td colspan="6"><div class="empty">{% icon "file-text" %}<h3>No receipts found</h3><p>Change the filters, or record a new receipt.</p></div></td></tr>
+      <tr><td colspan="6"><div class="empty">{% icon "file-text" %}<h3>No receipts found</h3></div></td></tr>
     {% endfor %}
     </tbody></table></div>
   {% include "components/pagination.html" %}

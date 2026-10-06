@@ -9,13 +9,13 @@ import uuid
 
 from django import forms
 from django.conf import settings
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.core.forms_base import StyledFormMixin
-from apps.core.models import Bank
+from apps.core.models import Bank, PaymentMethod, Relationship
 from apps.core.normalize import normalize_reference
 
-from .constants import PAYMENT_METHODS, RELATIONSHIPS
 from .models import TellerSubmission
 
 ALLOWED_REFERENCE_CHARS = re.compile(r"^[A-Za-z0-9 \-./]+$")
@@ -25,42 +25,42 @@ class ReceiptForm(StyledFormMixin, forms.Form):
     client_uuid = forms.UUIDField(widget=forms.HiddenInput, initial=uuid.uuid4)
     entered_at = forms.DateTimeField(widget=forms.HiddenInput, required=False)
 
-    sender_name = forms.CharField(
-        label="Sender name", max_length=150,
-        help_text="The person who paid, as written on the proof of payment.",
-        widget=forms.TextInput(attrs={"autocomplete": "off"}),
-    )
-    account_holder_name = forms.CharField(
-        label="Account holder name", max_length=150,
-        help_text="Name on the bank account that was used to pay.",
-        widget=forms.TextInput(attrs={"autocomplete": "off"}),
-    )
+    sender_name = forms.CharField(label="Sender name", max_length=150, widget=forms.TextInput(attrs={"autocomplete": "off"}))
+    account_holder_name = forms.CharField(label="Account holder name", max_length=150,
+                                          widget=forms.TextInput(attrs={"autocomplete": "off"}))
     relationship = forms.ChoiceField(
-        label="Relationship to sender", choices=[("", "Select a relationship")] + RELATIONSHIPS,
+        label="Relationship to sender", choices=[],
         error_messages={"required": "Select the sender's relationship to the account holder."},
     )
     bank = forms.ModelChoiceField(
-        label="Bank", queryset=Bank.objects.all(), empty_label="Select a bank",
+        label="Bank", queryset=Bank.objects.none(), empty_label="Select a bank",
         error_messages={"required": "Select the bank that received the payment."},
     )
     payment_method_code = forms.ChoiceField(
-        label="Payment method", choices=[("", "Select a payment method")] + PAYMENT_METHODS,
-        error_messages={"required": "Select how the customer paid (cash, CDM or transfer)."},
+        label="Payment method", choices=[],
+        error_messages={"required": "Select how the customer paid."},
     )
     amount = forms.DecimalField(
         label="Amount (RM)", min_value=0.01, max_value=9999999.99, decimal_places=2, max_digits=12,
-        help_text="Exact amount on the proof of payment. Even 1 sen difference is sent for review.",
         widget=forms.NumberInput(attrs={"step": "0.01", "inputmode": "decimal"}),
         error_messages={"invalid": "Enter the amount as a number, for example 150.00."},
     )
     bank_reference_no = forms.CharField(
         label="Bank reference number",
-        help_text="Spaces, hyphens and letter case are ignored when matching.",
+        help_text=f"{settings.REFERENCE_MIN_LENGTH} to {settings.REFERENCE_MAX_LENGTH} letters or digits",
         widget=forms.TextInput(attrs={"autocomplete": "off", "spellcheck": "false"}),
     )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Dropdown values are managed by the Admin (Master data). Inactive values stay visible only when
+        # the receipt being edited already uses them.
+        current = (self.initial or {})
+        self.fields["bank"].queryset = Bank.objects.filter(Q(is_active=True) | Q(pk=current.get("bank")))
+        self.fields["relationship"].choices = [("", "Select a relationship")] + [
+            (r.code, r.name) for r in Relationship.objects.filter(Q(is_active=True) | Q(code=current.get("relationship")))]
+        self.fields["payment_method_code"].choices = [("", "Select a payment method")] + [
+            (m.code, m.name) for m in PaymentMethod.objects.filter(Q(is_active=True) | Q(code=current.get("payment_method_code")))]
         low, high = settings.REFERENCE_MIN_LENGTH, settings.REFERENCE_MAX_LENGTH
         ref_widget = self.fields["bank_reference_no"].widget
         ref_widget.attrs.update({

@@ -5,67 +5,47 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ APP_NAME }}{% endblock %} | {{ APP_NAME }}</title>
   <meta name="color-scheme" content="light">
-  <link rel="stylesheet" href="{% static 'css/app.css' %}">
-  <link rel="icon" href="{% static 'img/favicon.svg' %}" type="image/svg+xml">
+  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=3">
+  <!-- <link rel="icon" href="{% static 'img/favicon.svg' %}" type="image/svg+xml"> -->
 </head>
 {% with current=request.resolver_match.view_name %}
-<body data-user-id="{{ user.pk|default:'' }}" data-poll-url="{% url 'core:notification_poll' %}" data-sw-url="{% url 'core:service_worker' %}" data-login-url="{% url 'accounts:login' %}">
+<body data-user-id="{{ user.pk|default:'' }}" data-poll-url="{% url 'core:notification_poll' %}" data-sw-url="{% url 'core:service_worker' %}">
   {% include "components/icons.html" %}
   <a class="skip-link" href="#main">Skip to main content</a>
-  <div class="shell">
-    <aside class="sidebar" id="sidebar" aria-label="Main navigation">
-      <a class="brand" href="{% url 'core:home_redirect' %}">
-        <span class="brand__mark">{% icon "scale" %}</span>
-        <span>Reconcile<small>Payment verification</small></span>
+  <header class="topbar">
+    <a class="brand" href="{% url 'core:home_redirect' %}"><span class="brand__mark">{% icon "scale" %}</span><span>Reconcile</span></a>
+    <nav class="topnav" aria-label="Main">
+      {% if user.role == "teller" %}
+        <a href="{% url 'receipts:new' %}" {% if current == 'receipts:new' %}aria-current="page"{% endif %}>New receipt</a>
+        <a href="{% url 'receipts:list' %}" {% if current == 'receipts:list' or current == 'receipts:detail' or current == 'receipts:edit' %}aria-current="page"{% endif %}>Receipts</a>
+      {% elif user.role == "finance" %}
+        <a href="{% url 'reconciliation:queue' %}" {% if current == 'reconciliation:queue' or current == 'reconciliation:detail' %}aria-current="page"{% endif %}>Reconciliation</a>
+        <a href="{% url 'reconciliation:import_list' %}" {% if current == 'reconciliation:import_list' or current == 'reconciliation:import_detail' %}aria-current="page"{% endif %}>Upload history</a>
+      {% elif user.role == "admin" %}
+        <a href="{% url 'accounts:user_list' %}" {% if current|slice:":14" == 'accounts:user_' %}aria-current="page"{% endif %}>Users</a>
+        <a href="{% url 'core:master_list' 'branches' %}" {% if current|slice:":12" == 'core:master_' %}aria-current="page"{% endif %}>Master data</a>
+        <a href="{% url 'reconciliation:queue' %}" {% if current == 'reconciliation:queue' or current == 'reconciliation:detail' %}aria-current="page"{% endif %}>Reconciliation</a>
+        <a href="{% url 'accounts:audit_log' %}" {% if current == 'accounts:audit_log' %}aria-current="page"{% endif %}>Audit trail</a>
+      {% endif %}
+    </nav>
+    <div class="topbar__right">
+      <a class="bell" href="{% url 'core:notifications' %}" aria-label="Notifications{% if unread_notifications %}, {{ unread_notifications }} unread{% endif %}">
+        {% icon "bell" %}<span class="bell__dot {% if not unread_notifications %}hidden{% endif %}" data-bell-count>{{ unread_notifications|default:0 }}</span>
       </a>
-      <nav class="nav">
-        {% if user.role == "teller" %}
-          <span class="nav__group">Teller</span>
-          <a href="{% url 'receipts:new' %}" {% if current == 'receipts:new' %}aria-current="page"{% endif %}>{% icon "plus" %} New receipt</a>
-          <a href="{% url 'receipts:list' %}" {% if current == 'receipts:list' or current == 'receipts:detail' %}aria-current="page"{% endif %}>{% icon "file-text" %} My branch receipts</a>
-        {% elif user.role == "finance" %}
-          <span class="nav__group">Finance</span>
-          <a href="{% url 'reconciliation:queue' %}" {% if current == 'reconciliation:queue' or current == 'reconciliation:detail' %}aria-current="page"{% endif %}>{% icon "list" %} Reconciliation</a>
-          <a href="{% url 'reconciliation:import_list' %}" {% if current == 'reconciliation:import_list' or current == 'reconciliation:import_detail' %}aria-current="page"{% endif %}>{% icon "upload" %} Bank statements</a>
-        {% elif user.role == "admin" %}
-          <span class="nav__group">Administration</span>
-          <a href="{% url 'accounts:user_list' %}" {% if current|slice:":14" == 'accounts:user_' %}aria-current="page"{% endif %}>{% icon "users" %} Users</a>
-          <a href="{% url 'accounts:audit_log' %}" {% if current == 'accounts:audit_log' %}aria-current="page"{% endif %}>{% icon "activity" %} Audit trail</a>
-          <a href="{% url 'reconciliation:queue' %}" {% if current == 'reconciliation:queue' %}aria-current="page"{% endif %}>{% icon "list" %} Reconciliation (read-only)</a>
-        {% endif %}
-        <span class="nav__group">System</span>
-        <a href="{% url 'core:notifications' %}" {% if current == 'core:notifications' %}aria-current="page"{% endif %}>{% icon "bell" %} Notifications{% if unread_notifications %} ({{ unread_notifications }}){% endif %}</a>
-        <a href="{% url 'core:architecture' %}" {% if current == 'core:architecture' %}aria-current="page"{% endif %}>{% icon "layers" %} Architecture</a>
-      </nav>
-      <div class="sidebar__user">
-        <strong>{{ user.name }}</strong>
-        <span>{{ user.get_role_display }}{% if user.branch %} - {{ user.branch.code }}{% endif %}</span>
+      <div class="userbox">
+        <span>{{ user.name }}{% if user.branch %} ({{ user.branch.code }}){% endif %}</span>
         <form method="post" action="{% url 'accounts:logout' %}" data-logout-form>{% csrf_token %}
-          <button class="nav-link-btn" type="submit">{% icon "log-out" %} Sign out</button>
+          <button class="btn btn--sm" type="submit">{% icon "log-out" %} Sign out</button>
         </form>
       </div>
-    </aside>
-
-    <div class="main">
-      <header class="topbar">
-        <button class="btn btn--quiet menu-toggle" type="button" data-menu-toggle aria-controls="sidebar" aria-expanded="false" aria-label="Open navigation">{% icon "menu" %}</button>
-        <div class="topbar__title">{% block topbar_title %}{% endblock %}</div>
-        <span class="net-status net-status--online" data-net-status role="status">{% icon "wifi" %}<span>Online</span></span>
-        <a class="bell" href="{% url 'core:notifications' %}" aria-label="Notifications{% if unread_notifications %}, {{ unread_notifications }} unread{% endif %}">
-          {% icon "bell" %}<span class="bell__dot {% if not unread_notifications %}hidden{% endif %}" data-bell-count>{{ unread_notifications|default:0 }}</span>
-        </a>
-      </header>
-      <main class="content" id="main" tabindex="-1">
-        {% if not within_business_hours and user.role == "finance" %}
-          <div class="alert alert--info" role="status">{% icon "clock" %}<div><span class="alert__title">Outside Finance working hours</span><p>Reconciliation is done during working hours ({{ BUSINESS_HOURS.0 }}-{{ BUSINESS_HOURS.1 }}, Monday to Friday). You can still upload a file; it is processed immediately.</p></div><span></span></div>
-        {% endif %}
-        {% include "components/alerts.html" %}
-        {% block content %}{% endblock %}
-      </main>
     </div>
-  </div>
+  </header>
+  <main class="content" id="main" tabindex="-1">
+    {% include "components/alerts.html" %}
+    {% block content %}{% endblock %}
+  </main>
   {% include "components/confirm_dialog.html" %}
-  <script src="{% static 'js/app.js' %}" defer></script>
+  <script src="{% static 'js/app.js' %}?v=3" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 {% endwith %}

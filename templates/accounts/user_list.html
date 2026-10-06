@@ -1,11 +1,25 @@
 {% extends "base.html" %}{% load ui %}
 {% block title %}Users{% endblock %}
-{% block topbar_title %}<strong>Users</strong>{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div><h1>Users</h1><p>Create accounts, change roles and reset passwords. Deactivating keeps the history; deleting is not offered so the audit trail stays complete.</p></div>
+  <h1>Users</h1>
   <div class="page-head__actions"><a class="btn btn--primary" href="{% url 'accounts:user_create' %}">{% icon "plus" %} Add user</a></div>
 </div>
+
+{% if reset_requests %}
+<section class="card card--flush mb-1" aria-labelledby="req-title">
+  <div class="card__head"><h2 id="req-title">{% icon "key" %} Password reset requests ({{ reset_requests|length }})</h2></div>
+  <div class="table-wrap"><table class="table"><tbody>
+  {% for r in reset_requests %}
+    <tr><td><strong>{{ r.user.name }}</strong><span class="sub">{{ r.user.email }}</span></td>
+        <td>{{ r.created_at|date:"d M Y H:i" }}</td>
+        <td class="num"><form method="post" action="{% url 'accounts:user_reset_password' r.user.pk %}" class="inline">{% csrf_token %}
+          <button class="btn btn--sm btn--primary" type="submit" data-confirm-title="Reset password?" data-confirm-message="A new temporary password will be generated for {{ r.user.name }}. The old password stops working immediately." data-confirm-label="Reset password">{% icon "key" %} Reset password</button></form></td></tr>
+  {% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
+
 <div class="card card--flush">
   <form class="filters" method="get" role="search">
     <label class="visually-hidden" for="q">Search users</label>
@@ -35,7 +49,7 @@
             {% if u.pk != user.pk %}
             <form method="post" action="{% url 'accounts:user_toggle_active' u.pk %}" class="inline">{% csrf_token %}
               {% if u.is_active %}
-              <button class="btn btn--sm" type="submit" data-confirm-title="Deactivate {{ u.name }}?" data-confirm-message="They will be signed out of new sessions and cannot sign in until you reactivate the account. Their history is kept." data-confirm-label="Deactivate" data-confirm-tone="danger">{% icon "user-x" %} Deactivate</button>
+              <button class="btn btn--sm" type="submit" data-confirm-title="Deactivate {{ u.name }}?" data-confirm-message="They cannot sign in until you reactivate the account. Their history is kept." data-confirm-label="Deactivate" data-confirm-tone="danger">{% icon "user-x" %} Deactivate</button>
               {% else %}
               <button class="btn btn--sm" type="submit">{% icon "user-check" %} Reactivate</button>
               {% endif %}
@@ -45,7 +59,7 @@
         </td>
       </tr>
     {% empty %}
-      <tr><td colspan="5"><div class="empty">{% icon "users" %}<h3>No users match these filters</h3><p>Clear the search or add a new user.</p></div></td></tr>
+      <tr><td colspan="5"><div class="empty">{% icon "users" %}<h3>No users found</h3></div></td></tr>
     {% endfor %}
     </tbody>
   </table>

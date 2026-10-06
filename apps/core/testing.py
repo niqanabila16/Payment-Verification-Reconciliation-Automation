@@ -3,6 +3,9 @@ import uuid
 from decimal import Decimal
 from pathlib import Path
 
+import hashlib
+
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from apps.accounts.models import Branch, Role, User
@@ -14,10 +17,11 @@ PASSWORD = "Test-Pass-12345!"
 
 
 def make_world():
-    """Two branches, two banks and one user per role. Returns a simple namespace-like dict."""
+    """Two branches, two banks and one user per role. Dropdown values and Mandiri come from the data migration."""
+    cache.clear()
     kj = Branch.objects.create(code="KJ", name="Kajang")
     pj = Branch.objects.create(code="PJ", name="Petaling Jaya")
-    mandiri = Bank.objects.create(code="MANDIRI", name="Bank Mandiri")
+    mandiri = Bank.objects.get(code="MANDIRI")
     rhb = Bank.objects.create(code="RHB", name="RHB Bank")
     users = {
         "admin": User.objects.create_user("admin@t.test", PASSWORD, name="Admin", role=Role.ADMIN),
@@ -46,3 +50,13 @@ def csv_upload(rows, name="stmt.csv", account="1230009876543", date="30/09/2026"
 
 def credit_row(reference, amount, ref_no, name="PAYER", description="RPP INWARD INST TRF CR"):
     return [description, "0100", "", f"{amount}", name, reference, "", ref_no]
+
+
+def upload_statement(user, rows, name="stmt.csv", **kwargs):
+    """Run a full upload (parse, store, match) synchronously. Returns the refreshed StatementImport."""
+    from apps.reconciliation.services.importer import start_import
+
+    data = csv_upload(rows, name=name, **kwargs).read()
+    imp = start_import(user=user, data=data, digest=hashlib.sha256(data).hexdigest(), file_name=name)
+    imp.refresh_from_db()
+    return imp

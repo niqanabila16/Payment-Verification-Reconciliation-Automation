@@ -1,18 +1,11 @@
 {% extends "base.html" %}{% load ui %}
 {% block title %}{% if mode == "create" %}Add user{% else %}Edit user{% endif %}{% endblock %}
-{% block topbar_title %}<strong>Users</strong>{% endblock %}
 {% block content %}
-<div class="page-head">
-  <div>
-    <h1>{% if mode == "create" %}Add user{% else %}Edit {{ target.name }}{% endif %}</h1>
-    <p>{% if mode == "create" %}A temporary password is generated after you save. Share it with the person safely; it is shown only once.{% else %}Changing the role takes effect the next time the person opens a page.{% endif %}</p>
-  </div>
-</div>
+<div class="page-head"><h1>{% if mode == "create" %}Add user{% else %}Edit {{ target.name }}{% endif %}</h1></div>
 {% include "components/error_summary.html" %}
-<form method="post" class="card form-card" novalidate>
+<form method="post" class="card form-card" novalidate data-role-branch-form>
   {% csrf_token %}
   <div class="card__body">
-    <p class="form-note">Fields marked * are required.</p>
     <div class="field-grid">
       {% include "components/field.html" with field=form.name %}
       {% include "components/field.html" with field=form.email %}

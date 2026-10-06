@@ -1,8 +1,7 @@
 {% extends "base.html" %}{% load ui %}
 {% block title %}Audit trail{% endblock %}
-{% block topbar_title %}<strong>Audit trail</strong>{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>Audit trail</h1><p>Every sign-in, import, match decision and account change. Entries are append-only: they cannot be edited or deleted, not even by an administrator.</p></div></div>
+<div class="page-head"><h1>Audit trail</h1></div>
 <div class="card card--flush">
   <form class="filters" method="get" role="search"><label class="visually-hidden" for="q">Filter</label>
     <input class="input input--grow" id="q" name="q" type="search" value="{{ q }}" placeholder="Filter by action, record type or person">
@@ -14,7 +13,7 @@
       <tr><td class="num">{{ e.created_at|date:"d M Y H:i:s" }}</td><td><code>{{ e.action }}</code></td><td>{{ e.entity_type }} #{{ e.entity_id }}</td><td>{{ e.actor.name|default:"System" }}</td>
           <td class="small muted">{% for k, v in e.payload.items %}{{ k }}: {{ v }}{% if not forloop.last %}; {% endif %}{% endfor %}</td></tr>
     {% empty %}
-      <tr><td colspan="5"><div class="empty">{% icon "activity" %}<h3>No entries yet</h3><p>Entries appear as people sign in and work.</p></div></td></tr>
+      <tr><td colspan="5"><div class="empty">{% icon "activity" %}<h3>No entries yet</h3></div></td></tr>
     {% endfor %}
     </tbody></table></div>
   {% include "components/pagination.html" %}

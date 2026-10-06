@@ -1,12 +1,16 @@
 """
 Matching engine (REQ-F-1.1, BR-1, BR-2, BR-6, BR-8). Deterministic rules + RapidFuzz (ADR-0003).
 
-For every open Teller submission the engine looks at CREDIT rows of statements of the same bank:
+For every open Teller submission the engine looks at the CREDIT rows of all imported statements
+(every statement comes from the same bank, Mandiri, so the bank on the receipt is not a filter):
 
   1. Reference equal/contained (after normalisation, BR-2) AND amount equal to the sen  -> GFP (score 100)
   2. Reference equal/contained BUT amount different                                      -> Manual review (BR-8)
   3. Amount equal AND reference similar (RapidFuzz ratio >= threshold)                   -> Typo suggestion
   4. Nothing found                                                                       -> Not found
+
+Open items are re-checked on EVERY new upload, however old they are (no cut-off date): a customer may
+confirm a payment a month later and the receipt must still match the statement that finally contains it.
 
 A "typo" or "manual review" result only SUGGESTS a bank row. Finance must confirm it
 (the final link is stored in bank_statement_entry, the suggestion in suggested_bank_statement_entry).
@@ -91,7 +95,7 @@ def decide(match: ReconciliationMatch, entries_by_amount: dict[Decimal, list[Sta
             return Decision(match.id, MatchStatus.MANUAL_REVIEW, MatchType.AUTO_EXACT, Decimal("100.00"),
                             suggested_id=hit.id,
                             note=f"Reference matches but the amount differs: Teller RM {sub.amount:,.2f} vs bank RM {hit.credit_amount:,.2f}. "
-                                 "No tolerance is allowed (BR-8), so Finance must review it.")
+                                 "No tolerance is allowed (BR-8).")
 
     # 3 -- same amount, similar reference
     best, best_key = None, (-1.0, -1.0)
@@ -106,18 +110,17 @@ def decide(match: ReconciliationMatch, entries_by_amount: dict[Decimal, list[Sta
         return Decision(match.id, MatchStatus.TYPO, MatchType.AUTO_FUZZY, Decimal(str(round(best_key[0], 2))),
                         suggested_id=best.id,
                         note=f"Amount matches and the reference is {best_key[0]:.0f}% similar. "
-                             "Likely a typo by the teller; confirm or reject the suggestion.")
+                             "Likely a typo by the teller.")
 
     # 4 -- nothing
-    return Decision(match.id, MatchStatus.NOT_FOUND, note="No credit row with this reference or a similar one was found yet. "
-                    "The engine retries on every new statement until the re-check window ends.")
+    return Decision(match.id, MatchStatus.NOT_FOUND, note="No credit row with this reference, or a similar one, in the uploaded statements yet.")
 
 
 def run_matching(*, actor=None, progress=None, match_ids=None, quiet=False) -> RunSummary:
     """
     Evaluate every open submission against all credit rows and save the outcomes.
     `progress(done, total)` is called regularly so the UI can show a progress bar.
-    Safe to call repeatedly: finalised matches (GFP / closed / awaiting Finance) are left alone.
+    Safe to call repeatedly: verified matches and items awaiting Finance's decision are left alone.
     `match_ids` limits the run to specific matches (used after a Teller corrects a receipt);
     `quiet=True` skips the Finance summary notification.
     """
@@ -130,31 +133,22 @@ def run_matching(*, actor=None, progress=None, match_ids=None, quiet=False) -> R
             [ReconciliationMatch(teller_submission=s, first_seen_at=s.entered_at) for s in orphans])
 
         now = timezone.now()
-        window = settings.RECHECK_WINDOW_DAYS
-        candidates = [
-            m for m in ReconciliationMatch.objects
+        candidates = list(
+            ReconciliationMatch.objects
             .filter(match_status__in=[MatchStatus.PENDING, MatchStatus.NOT_FOUND])
             .filter(**({"id__in": match_ids} if match_ids else {}))
-            .select_related("teller_submission", "teller_submission__bank")
+            .select_related("teller_submission")
             .order_by("first_seen_at", "id")
-            # pending items are always evaluated once; not_found items stop being retried after the window
-            if m.match_status == MatchStatus.PENDING or (now - m.first_seen_at).days < window
-        ]
+        )
         summary = RunSummary()
         if not candidates:
             return summary
 
-        # Credit rows grouped per bank; rows already used (or suggested) elsewhere are "claimed".
-        entries = list(StatementEntry.objects.filter(credit_amount__gt=0).select_related("statement_import"))
-        by_bank: dict[int, list[StatementEntry]] = defaultdict(list)
+        # Credit rows grouped by amount for the typo rule; rows already used (or suggested) elsewhere are "claimed".
+        entries = list(StatementEntry.objects.filter(credit_amount__gt=0))
+        by_amount: dict[Decimal, list[StatementEntry]] = defaultdict(list)
         for entry in entries:
-            by_bank[entry.statement_import.bank_id].append(entry)
-        by_bank_amount: dict[int, dict[Decimal, list[StatementEntry]]] = {}
-        for bank_id, rows in by_bank.items():
-            grouped: dict[Decimal, list[StatementEntry]] = defaultdict(list)
-            for row in rows:
-                grouped[row.credit_amount].append(row)
-            by_bank_amount[bank_id] = grouped
+            by_amount[entry.credit_amount].append(entry)
         claimed = set(ReconciliationMatch.objects.exclude(bank_statement_entry=None).values_list("bank_statement_entry_id", flat=True))
         claimed |= set(ReconciliationMatch.objects.filter(match_status__in=[MatchStatus.TYPO, MatchStatus.MANUAL_REVIEW])
                        .exclude(suggested_bank_statement_entry=None).values_list("suggested_bank_statement_entry_id", flat=True))
@@ -162,8 +156,7 @@ def run_matching(*, actor=None, progress=None, match_ids=None, quiet=False) -> R
         decisions: list[tuple[ReconciliationMatch, Decision]] = []
         total = len(candidates)
         for done, match in enumerate(candidates, start=1):
-            bank_id = match.teller_submission.bank_id
-            decision = decide(match, by_bank_amount.get(bank_id, {}), by_bank.get(bank_id, []), claimed)
+            decision = decide(match, by_amount, entries, claimed)
             for taken in (decision.entry_id, decision.suggested_id):
                 if taken:
                     claimed.add(taken)   # an entry can serve only one submission

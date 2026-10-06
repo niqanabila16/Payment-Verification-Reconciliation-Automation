@@ -1,15 +1,12 @@
-"""Cross-cutting pages: home redirect, notifications, architecture page, service worker, health check."""
+"""Cross-cutting pages: home redirect, notifications, service worker, health check."""
 from pathlib import Path
 
 from django.conf import settings
-from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.paginator import Paginator
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import redirect, render
+from django.views.decorators.http import require_GET
 from django.utils import timezone
-from django.utils.http import url_has_allowed_host_and_scheme
-from django.views.decorators.http import require_GET, require_POST
 
 from .models import Notification
 from .notifications import notification_url
@@ -48,23 +45,21 @@ def service_worker(request):
     return response
 
 
-@login_required
-def architecture(request):
-    return render(request, "core/architecture.html")
-
-
 # --------------------------------------------------------------------------
 # Notifications
 # --------------------------------------------------------------------------
 @login_required
 def notification_list(request):
-    qs = Notification.objects.filter(recipient=request.user)
-    if request.GET.get("filter") == "unread":
-        qs = qs.filter(status="unread")
-    page = Paginator(qs, 20).get_page(request.GET.get("page"))
-    for item in page.object_list:
+    """
+    All notifications, newest first. Showing the page IS reading them: unread ones are highlighted in
+    this response and flagged as read in the database right after, so there is no "mark as read" button.
+    """
+    items = list(Notification.objects.filter(recipient=request.user))
+    for item in items:
         item.url = notification_url(item)
-    return render(request, "core/notifications.html", {"page": page, "filter": request.GET.get("filter", "all")})
+    response = render(request, "core/notifications.html", {"items": items})
+    Notification.objects.filter(recipient=request.user, status="unread").update(status="read", read_at=timezone.now())
+    return response
 
 
 @login_required
@@ -85,23 +80,3 @@ def notification_poll(request):
         "latest_id": mine.order_by("-id").values_list("id", flat=True).first() or 0,
         "items": [{"id": n.id, "message": n.message, "url": notification_url(n)} for n in fresh],
     })
-
-
-@login_required
-@require_POST
-def notification_read(request, pk: int):
-    Notification.objects.filter(pk=pk, recipient=request.user, status="unread").update(
-        status="read", read_at=timezone.now())
-    next_url = request.POST.get("next", "")
-    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
-        return redirect(next_url)
-    return redirect("core:notifications")
-
-
-@login_required
-@require_POST
-def notification_read_all(request):
-    updated = Notification.objects.filter(recipient=request.user, status="unread").update(
-        status="read", read_at=timezone.now())
-    messages.success(request, f"Marked {updated} notification(s) as read.")
-    return redirect("core:notifications")

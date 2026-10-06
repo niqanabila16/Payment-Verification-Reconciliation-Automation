@@ -46,6 +46,8 @@ def notification_url(notification: Notification) -> str:
             return reverse("receipts:detail", args=[pk])
         if kind == "import" and pk:
             return reverse("reconciliation:import_detail", args=[pk])
+        if kind == "password_request":
+            return reverse("accounts:user_list")
     except Exception:  # pragma: no cover - a dangling reference must never break the page
         logger.exception("Could not build notification URL")
     return reverse("core:notifications")

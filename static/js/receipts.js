@@ -125,7 +125,7 @@
         enqueue(fields);                                                           // network down or server unreachable
         card.innerHTML = pristine; bind();
         card.querySelector('[name="client_uuid"]').value = uuid();
-        showFlash('warning', 'Saved on this computer', 'The central computer could not be reached. The receipt will be sent automatically when the connection is back. Keep this page open or come back to it later.');
+        showFlash('warning', 'Saved on this computer', 'It will be sent automatically when the connection returns.');
         card.querySelector('input:not([type=hidden])').focus();
       }
     });

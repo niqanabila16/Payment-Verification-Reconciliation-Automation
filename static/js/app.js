@@ -1,20 +1,10 @@
-/* Site-wide behaviour: navigation, alerts, confirmation dialog, notifications, service worker.
+/* Site-wide behaviour: alerts, confirmation dialog, password toggle, notifications, service worker.
    No framework and no build step. Everything degrades gracefully when JavaScript is off. */
 (() => {
   'use strict';
   const body = document.body;
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-
-  /* ---- Mobile navigation ------------------------------------------------ */
-  const toggle = $('[data-menu-toggle]');
-  const sidebar = $('#sidebar');
-  if (toggle && sidebar) {
-    toggle.addEventListener('click', () => {
-      const open = sidebar.classList.toggle('is-open');
-      toggle.setAttribute('aria-expanded', String(open));
-    });
-  }
 
   /* ---- Move focus to error summaries / alerts so screen readers announce them ---- */
   const focusTarget = $('[data-focus-on-load]');
@@ -67,14 +57,17 @@
   /* ---- Prevent double submits and show a loading state ------------------ */
   $$('form').forEach((form) => {
     if (form.hasAttribute('data-receipt-form')) return;  // receipts.js handles its own submit
-    form.addEventListener('submit', () => {
-      if (form.dataset.submitting) return;
-      const button = $('[data-submit-btn]', form);
-      if (!button) return;
-      form.dataset.submitting = '1';
-      button.classList.add('is-loading');
-      button.setAttribute('aria-disabled', 'true');
-      if (button.dataset.loadingText) button.lastChild.textContent = ' ' + button.dataset.loadingText;
+    form.addEventListener('submit', (event) => {
+      // Wait one tick: another script (for example the duplicate-file question) may cancel this submit.
+      setTimeout(() => {
+        if (event.defaultPrevented || form.dataset.submitting) return;
+        const button = $('[data-submit-btn]', form);
+        if (!button) return;
+        form.dataset.submitting = '1';
+        button.classList.add('is-loading');
+        button.setAttribute('aria-disabled', 'true');
+        if (button.dataset.loadingText) button.lastChild.textContent = ' ' + button.dataset.loadingText;
+      }, 0);
     });
   });
   window.addEventListener('pageshow', (event) => {      // back button restores the page: reset the buttons
@@ -86,18 +79,31 @@
     });
   });
 
-  /* ---- Online / offline indicator --------------------------------------- */
-  const net = $('[data-net-status]');
-  function paintNetwork() {
-    if (!net) return;
-    const online = navigator.onLine;
-    net.className = 'net-status ' + (online ? 'net-status--online' : 'net-status--offline');
-    net.lastElementChild.textContent = online ? 'Online' : 'Offline';
-    net.firstElementChild.firstElementChild.setAttribute('href', online ? '#i-wifi' : '#i-wifi-off');
+  /* ---- Show / hide password ---------------------------------------------- */
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-toggle-password]');
+    if (!button) return;
+    const input = button.closest('.password-wrap').querySelector('input');
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    button.setAttribute('aria-pressed', String(show));
+    button.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    button.querySelector('use').setAttribute('href', show ? '#i-eye-off' : '#i-eye');
+  });
+
+  /* ---- User form: Branch is only for tellers; grey it out for Finance and Admin ---- */
+  const roleForm = $('[data-role-branch-form]');
+  if (roleForm) {
+    const role = $('[name="role"]', roleForm);
+    const branch = $('[name="branch"]', roleForm);
+    const sync = () => {
+      const needsBranch = role.value === 'teller';
+      branch.disabled = !needsBranch;
+      if (!needsBranch) branch.value = '';
+    };
+    role.addEventListener('change', sync);
+    sync();
   }
-  window.addEventListener('online', paintNetwork);
-  window.addEventListener('offline', paintNetwork);
-  paintNetwork();
 
   /* ---- Service worker (offline Teller form + desktop notifications) ------ */
   let registration = null;

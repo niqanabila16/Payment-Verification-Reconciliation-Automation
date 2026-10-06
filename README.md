@@ -9,11 +9,11 @@ downloaded by **Finance**, flags typos and differences, and keeps an audit trail
 
 | Role | What they do |
 |---|---|
-| Teller | Enter receipts (works offline and syncs later), see results, answer Finance |
-| Finance | Upload bank statements, review typos / differences / not found, approve or send feedback |
-| Admin | Manage users and roles, reset passwords, read the audit trail |
+| Teller | Enter receipts (works offline and syncs later), see Pending or Verified, get notified |
+| Finance | Upload the Mandiri statement on the Reconciliation page, review typos / differences / not found, approve or send a correction request |
+| Admin | Manage users, reset passwords (incl. requests from "Forgot password"), manage dropdown values (Master data), read the audit trail |
 
-> Documentation map: [Architecture](docs/ARCHITECTURE.md) | [Requirements traceability](docs/REQUIREMENTS_TRACEABILITY.md) |
+> Documentation map: [Architecture](docs/ARCHITECTURE.md) (diagram: `architecture-diagram.png`) | [Requirements traceability](docs/REQUIREMENTS_TRACEABILITY.md) |
 > [UI standards](docs/UI_STANDARDS.md) | [Maintenance, testing and troubleshooting](docs/MAINTENANCE.md) | [Database notes](docs/DATABASE.md)
 
 ---
@@ -47,14 +47,22 @@ Open <http://127.0.0.1:8000> and sign in with a demo account (password `Demo-Pas
 | Teller (branch KJ) | `teller.kj@demo.test` |
 | Teller (branch PJ) | `teller.pj@demo.test` |
 
-**Try the whole flow in 2 minutes**
+**Try the whole flow in 3 minutes** (the demo creates users only, no receipts)
 
-1. Sign in as `finance@demo.test` > **Bank statements** > choose bank *Bank Mandiri* > select
-   `sample_data\mandiri_statement_2026-09-30.csv` > **Upload and match**.
-2. Watch the progress bar. The result shows: 5 Match (GFP), 1 Typo, 1 Manual review, 1 Not found.
-3. Open **Reconciliation**. Click the typo item: the side-by-side view shows identical fields in green and
-   different fields in red, with the differing characters of the reference underlined.
-4. Approve it, or send feedback to the teller. Sign in as `teller.kj@demo.test` to see the notification, correct the receipt and watch it re-match.
+1. Sign in as `teller.kj@demo.test` > **New receipt**. Enter these receipts (Bank *Bank Mandiri*, Payment method *Bank transfer*, any sender name):
+
+   | Amount | Reference | Expected result |
+   |---|---|---|
+   | 150.00 | `2235277A1` | Verified (GFP) |
+   | 1200.00 | `611380310m` | Verified (case ignored) |
+   | 320.00 | `99120054` | Review: typo (bank has `99120045`) |
+   | 205.00 | `55302211` | Review: amount differs (bank has 250.00) |
+   | 400.00 | `90019001` | Not found |
+
+2. Sign in as `finance@demo.test`. On **Reconciliation** choose `sample_data\mandiri_statement_2026-09-30.csv` and press **Upload and match**. Watch the progress bar and the result.
+3. Open the *Review* tab and click an item: identical fields are green, different fields are red, and the differing characters of the reference are underlined. **Approve**, or **Send to teller**.
+4. Sign in as the teller again: the bell shows the notification; verified receipts show *Verified*, everything else shows *Pending*.
+5. Upload the same file again: a question appears ("This file was uploaded before. Upload it again?"). Transactions already stored are never counted twice.
 
 > Demo data is for trying the system only. For real use run `.\scripts\setup.ps1 -NoDemo` (creates your first administrator instead).
 
@@ -96,7 +104,7 @@ Deactivate the environment with `deactivate`.
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python manage.py test                 # 81 tests, about 2 seconds
+python manage.py test                 # 110 tests, about 2 seconds
 python manage.py test apps.reconciliation -v 2      # one app, verbose
 python manage.py check --deploy       # security checklist (run with DJANGO_DEBUG=False)
 ```
@@ -107,15 +115,16 @@ python manage.py check --deploy       # security checklist (run with DJANGO_DEBU
 config/                 Django settings, root URLs, WSGI
 apps/
   accounts/             Branch + User models, sign-in, Admin user management, throttling
-  core/                 Bank, AuditLog, Notification, middleware, template tags, seed_demo command
+  core/                 Bank, PaymentMethod, Relationship (Master data), AuditLog, Notification, middleware, template tags, seed_demo
   receipts/             Teller receipt form, validation, list/detail/edit, offline sync endpoint
   reconciliation/       Statement parser, matching engine, importer, Finance review services and screens
     services/           parser.py  engine.py  importer.py  review.py  submissions.py  notify.py
 templates/              Django templates (components/ holds reusable alert, field, dialog, pagination)
 static/css/app.css      Design system (tokens, components)
 static/js/              app.js (site-wide), receipts.js (offline queue), import_progress.js, sw.js (service worker)
-static/img/             architecture.svg, favicon
+static/img/             favicon
 sample_data/            Demo bank statement (CSV + XLSX) and the script that builds them
+architecture-diagram.png/.svg   Software architecture diagram (not part of the website)
 scripts/                setup.ps1  run.ps1  serve.ps1  backup.ps1
 docs/                   Architecture, traceability, UI standards, maintenance, database notes
 ```
@@ -131,7 +140,6 @@ docs/                   Architecture, traceability, UI standards, maintenance, d
 | `DB_ENGINE` | `sqlite` | `postgres` to use PostgreSQL (see below). |
 | `NOTIFY_BY_EMAIL` | `False` | Send an e-mail digest to tellers after each run (needs SMTP settings). |
 | `MATCH_TYPO_MIN_SCORE` | `80` | Minimum RapidFuzz similarity for a typo suggestion. |
-| `RECHECK_WINDOW_DAYS` | `31` | How long the engine keeps re-checking unmatched receipts (BR-10). |
 | `REFERENCE_MIN_LENGTH` / `MAX` | `6` / `20` | Allowed length of the bank reference (NFR-PERF-2). |
 
 Business rule values live in `config/settings.py` and are explained in [docs/REQUIREMENTS_TRACEABILITY.md](docs/REQUIREMENTS_TRACEABILITY.md).
@@ -177,11 +185,8 @@ PostgreSQL support follows the DBML schema but was not run in the automated test
 ## 8. First-day checklist for real use
 
 1. `.\scripts\setup.ps1 -NoDemo` and create the first administrator.
-2. Sign in as that administrator > **Users** > add Finance and Teller accounts (each Teller needs a branch). A temporary password is shown once.
-3. Add branches and banks (master data). Until an admin screen exists for these, use:
-   ```powershell
-   python manage.py shell -c "from apps.accounts.models import Branch; from apps.core.models import Bank; Branch.objects.get_or_create(code='KJ', defaults={'name':'Kajang'}); Bank.objects.get_or_create(code='MANDIRI', defaults={'name':'Bank Mandiri'})"
-   ```
+2. Sign in as that administrator > **Master data** > add your branches, then **Users** > add Finance and Teller accounts (each Teller needs a branch). A temporary password is shown once.
+3. Add more banks, payment methods or relationship values under **Master data** when needed (Bank Mandiri, Cash / CDM / Transfer and the usual relationships already exist). Branches were added in step 2, banks, payment methods and relationship values (Bank Mandiri and the usual payment methods and relationships already exist).
 4. Download one real statement from the bank and upload it. If the header is not on row 4 the screen tells you exactly what to fix.
 
 ## 9. Known limitations (read before go-live)
@@ -189,6 +194,7 @@ PostgreSQL support follows the DBML schema but was not run in the automated test
 * **No bank API** (constraint). Finance downloads and uploads the statement. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#where-would-automation-plug-in) for where an automated feed would plug in.
 * **Single server process.** The import runs in a background thread and a lock allows one matching run at a time. Do not start several server processes on the same database; use Redis + RQ (planned Phase 2) before scaling out.
 * **Desktop alerts** reach users while the site is open in a browser tab/window (even in the background). Users who closed the browser are reached by the optional e-mail digest. True push to a closed browser needs Web Push (future work).
-* **Branches and banks have no admin screen yet**; add them with the command in section 8.
+* **No account lockout.** As requested there is no access locking of any kind (neither working hours nor failed sign-in attempts). Anyone who can reach the site can try passwords without limit, so keep it on the office network or behind a VPN.
+* **Bank on the receipt is informational.** Every statement is Mandiri, so a receipt is matched by reference and amount whatever bank the teller selected.
 * **Visual check**: the interface was verified through automated rendering tests and a live HTTP run, not in every browser. Do a quick pass in Edge and Chrome on a branch computer.
 * PowerShell scripts were written for Windows PowerShell 5.1 and PowerShell 7 but could not be executed in the build environment; the manual steps in section 3 are the reference.

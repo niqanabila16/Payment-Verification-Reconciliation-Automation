@@ -1,33 +1,20 @@
 {% extends "base.html" %}{% load ui %}
 {% block title %}Notifications{% endblock %}
-{% block topbar_title %}<strong>Notifications</strong>{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div><h1>Notifications</h1><p>Results of reconciliation runs, Finance decisions and comments. Desktop alerts reach you while this site is open in the background; the e-mail digest (if enabled by the administrator) reaches you when it is closed.</p></div>
-  <div class="page-head__actions">
-    <button class="btn" type="button" data-enable-desktop-alerts>{% icon "bell" %} Enable desktop alerts</button>
-    <form method="post" action="{% url 'core:notification_read_all' %}">{% csrf_token %}<button class="btn" type="submit">{% icon "check-circle" %} Mark all as read</button></form>
-  </div>
+  <h1>Notifications</h1>
+  <div class="page-head__actions"><button class="btn" type="button" data-enable-desktop-alerts>{% icon "bell" %} Enable desktop alerts</button></div>
 </div>
-<div class="alert alert--info hidden" role="status" data-desktop-alert-help>{% icon "info" %}<div><span class="alert__title">Desktop alerts are blocked</span><p>Allow notifications for this site in your browser's address bar settings, then press the button again.</p></div><span></span></div>
+<div class="alert alert--info hidden" role="status" data-desktop-alert-help>{% icon "info" %}<div><span class="alert__title">Desktop alerts are blocked</span><p>Allow notifications for this site in the browser, then press the button again.</p></div><span></span></div>
 <div class="card card--flush">
-  <div class="tabs" role="navigation" aria-label="Notification filter">
-    <a href="?filter=all" {% if filter != "unread" %}aria-current="page"{% endif %}>All</a>
-    <a href="?filter=unread" {% if filter == "unread" %}aria-current="page"{% endif %}>Unread</a>
-  </div>
-  {% for n in page.object_list %}
-    <div class="notif {% if n.is_unread %}notif--unread{% endif %}">
+  {% for n in items %}
+    <a class="notif {% if n.is_unread %}notif--unread{% endif %}" href="{{ n.url }}">
       <span class="dot {% if not n.is_unread %}dot--off{% endif %}" aria-hidden="true"></span>
-      <div><span>{{ n.message }}</span><time datetime="{{ n.created_at|date:'c' }}">{{ n.created_at|date:"d M Y H:i" }}{% if n.is_unread %} <span class="visually-hidden">(unread)</span>{% endif %}</time></div>
-      <div class="flex">
-        {% if n.is_unread %}
-        <form method="post" action="{% url 'core:notification_read' n.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ n.url }}"><button class="btn btn--sm" type="submit">Open</button></form>
-        {% else %}<a class="btn btn--sm" href="{{ n.url }}">Open</a>{% endif %}
-      </div>
-    </div>
+      <span>{{ n.message }}{% if n.is_unread %}<span class="visually-hidden"> (new)</span>{% endif %}<time datetime="{{ n.created_at|date:'c' }}">{{ n.created_at|date:"d M Y H:i" }}</time></span>
+      {% icon "arrow-right" %}
+    </a>
   {% empty %}
-    <div class="empty">{% icon "bell" %}<h3>{% if filter == "unread" %}You are all caught up{% else %}No notifications yet{% endif %}</h3><p>New results and comments will appear here.</p></div>
+    <div class="empty">{% icon "bell" %}<h3>No notifications</h3></div>
   {% endfor %}
-  {% include "components/pagination.html" %}
 </div>
 {% endblock %}

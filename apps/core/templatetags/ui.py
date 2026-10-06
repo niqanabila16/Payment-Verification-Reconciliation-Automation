@@ -6,16 +6,17 @@ from django import template
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
+from apps.core import lookups
+
 register = template.Library()
 
 # Status -> (label, css modifier, icon). Icon + text are always shown, so meaning never depends on colour alone.
 STATUS_STYLES = {
-    "pending": ("Pending", "neutral", "clock"),
+    "pending": ("Pending", "warning", "clock"),
     "gfp": ("Verified (GFP)", "success", "check-circle"),
-    "typo": ("Typo suspected", "warning", "alert-triangle"),
+    "typo": ("Review: typo", "review", "search"),
+    "manual_review": ("Review: amount differs", "review", "search"),
     "not_found": ("Not found", "danger", "x-circle"),
-    "manual_review": ("Manual review", "review", "search"),
-    "closed": ("Closed", "muted", "lock"),
 }
 
 
@@ -31,6 +32,22 @@ def status_badge(status: str) -> str:
     label, tone, icon_name = STATUS_STYLES.get(status, (status, "neutral", "info"))
     return format_html('<span class="badge badge--{}">{}<span>{}</span></span>',
                        tone, icon(icon_name), label)
+
+
+@register.simple_tag
+def teller_badge(status: str) -> str:
+    """Tellers only see two states: Verified, or Pending for anything else."""
+    return status_badge("gfp" if status == "gfp" else "pending")
+
+
+@register.filter
+def payment_method_label(code: str) -> str:
+    return lookups.label("payment_method", code)
+
+
+@register.filter
+def relationship_label(code: str) -> str:
+    return lookups.label("relationship", code)
 
 
 @register.filter

@@ -9,6 +9,37 @@ class Bank(models.Model):
 
     code = models.CharField(max_length=20, unique=True, help_text="e.g. RHB, MANDIRI")
     name = models.CharField(max_length=100)
+    is_active = models.BooleanField(default=True, help_text="Inactive banks are hidden from dropdowns; history is kept.")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class PaymentMethod(models.Model):
+    """Value list for the Teller form dropdown "Payment method". Managed by Admin."""
+
+    code = models.CharField(max_length=10, unique=True, help_text="Stored on receipts, e.g. CASH.")
+    name = models.CharField(max_length=100)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Relationship(models.Model):
+    """Value list for the Teller form dropdown "Relationship to sender". Managed by Admin."""
+
+    code = models.CharField(max_length=50, unique=True, help_text="Stored on receipts, e.g. SIBLING.")
+    name = models.CharField(max_length=100)
+    is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:

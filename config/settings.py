@@ -124,8 +124,6 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 10}},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
 ]
-LOGIN_MAX_ATTEMPTS = 5          # failed sign-ins per e-mail before a temporary lock
-LOGIN_LOCKOUT_MINUTES = 15
 
 import sys  # noqa: E402
 
@@ -180,10 +178,10 @@ ALLOWED_STATEMENT_EXTENSIONS = (".csv", ".xlsx")
 # Business rules. Every number the matching engine uses lives here.
 # --------------------------------------------------------------------------
 MATCH_TYPO_MIN_SCORE = float(env("MATCH_TYPO_MIN_SCORE", "80"))   # RapidFuzz ratio, 0-100
-RECHECK_WINDOW_DAYS = int(env("RECHECK_WINDOW_DAYS", "31"))       # customers may confirm up to ~1 month late
+STATEMENT_BANK_CODE = "MANDIRI"                                   # every uploaded statement belongs to this bank
+OFFLINE_TIMESTAMP_MAX_AGE_DAYS = 31                               # offline receipts older than this use server time
 REFERENCE_MIN_LENGTH = int(env("REFERENCE_MIN_LENGTH", "6"))      # NFR-PERF-2 (frontend + backend)
 REFERENCE_MAX_LENGTH = int(env("REFERENCE_MAX_LENGTH", "20"))
-BUSINESS_HOURS = ("08:30", "16:30")                               # Finance working window (informational)
 STATEMENT_HEADER_ROW = 4                                          # BR-5: header is on row 4 (rows 1-3 are preamble)
 IMPORT_RUN_SYNC = False   # False: process imports in a background thread (progress bar); tests set True
 

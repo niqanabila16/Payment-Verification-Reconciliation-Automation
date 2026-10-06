@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% load ui %}
+{% block title %}Edit {{ cfg.singular }}{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Edit {{ cfg.singular }} {{ obj.code }}</h1></div>
+{% include "components/error_summary.html" %}
+<form method="post" class="card form-card" novalidate>
+  {% csrf_token %}
+  <div class="card__body"><div class="field-grid">
+    {% include "components/field.html" with field=form.code %}
+    {% include "components/field.html" with field=form.name %}
+  </div></div>
+  <div class="card__foot"><a class="btn" href="{% url 'core:master_list' kind %}">Cancel</a><button class="btn btn--primary" type="submit">Save changes</button></div>
+</form>
+{% endblock %}

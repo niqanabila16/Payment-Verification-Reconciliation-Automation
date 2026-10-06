@@ -32,7 +32,7 @@ class StatementImport(models.Model):
     account_label = models.CharField(max_length=100, blank=True)
     statement_date = models.DateField(help_text='"as at" date from the statement header (row 1).')
     file_name = models.CharField(max_length=255)
-    file_sha256 = models.CharField(max_length=64, unique=True, help_text="BR-1: the same file can never be imported twice.")
+    file_sha256 = models.CharField(max_length=64, db_index=True, help_text="Used to warn when the same file is uploaded again.")
     file_format = models.CharField(max_length=10, choices=StatementFormat.choices, default=StatementFormat.CSV)
     row_count = models.IntegerField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=ImportStatus.choices, default=ImportStatus.PROCESSING)
@@ -45,9 +45,6 @@ class StatementImport(models.Model):
 
     class Meta:
         ordering = ["-imported_at"]
-        constraints = [
-            models.UniqueConstraint(fields=["bank", "account_number", "statement_date"], name="uniq_statement_per_day"),
-        ]
 
     def __str__(self) -> str:
         return f"{self.file_name} ({self.statement_date})"
@@ -90,18 +87,20 @@ class MatchType(models.TextChoices):
 
 
 class MatchStatus(models.TextChoices):
-    """Statuses use the business vocabulary of the Finance team."""
+    """
+    Statuses use the business vocabulary of the Finance team.
+    Tellers only ever see two of them: Pending (everything not verified yet) or Verified (GFP).
+    """
 
     PENDING = "pending", "Pending"
     GFP = "gfp", "Verified (GFP)"
-    TYPO = "typo", "Typo suspected"
+    TYPO = "typo", "Review: typo"
     NOT_FOUND = "not_found", "Not found"
-    MANUAL_REVIEW = "manual_review", "Manual review"
-    CLOSED = "closed", "Closed"
+    MANUAL_REVIEW = "manual_review", "Review: amount differs"
 
 
 OPEN_STATUSES = (MatchStatus.PENDING, MatchStatus.TYPO, MatchStatus.NOT_FOUND, MatchStatus.MANUAL_REVIEW)
-ATTENTION_STATUSES = (MatchStatus.TYPO, MatchStatus.MANUAL_REVIEW, MatchStatus.NOT_FOUND)
+REVIEW_STATUSES = (MatchStatus.TYPO, MatchStatus.MANUAL_REVIEW)
 
 
 class ReconciliationMatch(models.Model):
@@ -119,14 +118,12 @@ class ReconciliationMatch(models.Model):
     match_type = models.CharField(max_length=20, choices=MatchType.choices, blank=True)
     match_score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     match_status = models.CharField(max_length=20, choices=MatchStatus.choices, default=MatchStatus.PENDING, db_index=True)
-    first_seen_at = models.DateTimeField(default=timezone.now, help_text="Start of the >= 1 month re-check window.")
+    first_seen_at = models.DateTimeField(default=timezone.now, help_text="When the receipt entered the queue (sort order).")
     last_attempt_at = models.DateTimeField(null=True, blank=True)
     attempt_count = models.PositiveIntegerField(default=0)
     matched_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
                                    related_name="+", help_text="Empty for automatic matches.")
     matched_at = models.DateTimeField(null=True, blank=True)
-    closed_reason = models.TextField(blank=True, help_text="Mandatory when status is Closed.")
-    closed_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True, help_text="Engine explanation or Finance note shown on the detail page.")
 
     class Meta:
@@ -137,21 +134,9 @@ class ReconciliationMatch(models.Model):
 
     @property
     def is_open(self) -> bool:
-        return self.match_status in OPEN_STATUSES
+        return self.match_status != MatchStatus.GFP
 
     @property
-    def is_aged(self) -> bool:
-        """True once the re-check window has passed (the engine stops retrying automatically)."""
-        return (timezone.now() - self.first_seen_at).days >= settings.RECHECK_WINDOW_DAYS
-
-
-class MatchComment(models.Model):
-    """Discussion thread per transaction (replaces the WhatsApp group)."""
-
-    reconciliation_match = models.ForeignKey(ReconciliationMatch, on_delete=models.CASCADE, related_name="comments")
-    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="comments")
-    comment = models.TextField()
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        ordering = ["created_at", "id"]
+    def teller_status(self) -> str:
+        """Tellers only see Pending or Verified; every unresolved state is "pending" for them."""
+        return MatchStatus.GFP if self.match_status == MatchStatus.GFP else MatchStatus.PENDING

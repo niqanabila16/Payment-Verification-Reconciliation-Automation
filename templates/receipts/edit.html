@@ -1,7 +1,6 @@
 {% extends "base.html" %}{% load ui %}
 {% block title %}Correct receipt #{{ sub.pk }}{% endblock %}
-{% block topbar_title %}<strong>Correct receipt #{{ sub.pk }}</strong>{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>Correct receipt #{{ sub.pk }}</h1><p>Fix the values that do not match the proof of payment. After saving, the receipt is checked against the bank statement again straight away.</p></div></div>
+<div class="page-head"><h1>Correct receipt #{{ sub.pk }}</h1></div>
 <section class="card form-card">{% include "receipts/_form.html" %}</section>
 {% endblock %}

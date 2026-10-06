@@ -5,3 +5,6 @@ rapidfuzz>=3.9,<4         # Fuzzy matching used by the typo-tolerance rule (ADR-
 python-dotenv>=1.0,<2     # Loads the .env configuration file
 whitenoise>=6.7,<7        # Serves static files when DEBUG=False
 waitress>=3.0,<4          # Production WSGI server that works on Windows (gunicorn does not)
+
+# Development dependencies
+django-browser-reload>=1.12,<2  # Auto-reloads browser in development (Tailwind CSS)

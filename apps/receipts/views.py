@@ -1,6 +1,7 @@
 """Teller screens: submit a receipt (online or queued offline), list receipts, see results."""
 from datetime import timedelta
 
+from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db.models import Q
@@ -11,8 +12,7 @@ from django.utils import timezone
 
 from apps.accounts.models import Role
 from apps.core.permissions import role_required
-from apps.reconciliation.forms import CommentForm
-from apps.reconciliation.models import MatchStatus, ReconciliationMatch
+from apps.reconciliation.models import MatchStatus
 from apps.reconciliation.services import review
 from apps.reconciliation.services.engine import run_matching
 from apps.reconciliation.services.submissions import create_submission
@@ -28,10 +28,10 @@ def _wants_json(request) -> bool:
 def _trusted_entered_at(value):
     """
     Offline receipts carry the time the teller typed them. Accept it only when plausible
-    (not in the future, not older than the re-check window); otherwise use server time.
+    (not in the future, not older than OFFLINE_TIMESTAMP_MAX_AGE_DAYS); otherwise use server time.
     """
     now = timezone.now()
-    if value and now - timedelta(days=31) <= value <= now + timedelta(minutes=5):
+    if value and now - timedelta(days=settings.OFFLINE_TIMESTAMP_MAX_AGE_DAYS) <= value <= now + timedelta(minutes=5):
         return value
     return None
 
@@ -68,23 +68,21 @@ def receipt_list(request):
           if branch else TellerSubmission.objects.none())
     status = request.GET.get("status", "")
     q = request.GET.get("q", "").strip()
-    if status in MatchStatus.values:
-        qs = qs.filter(match__match_status=status)
+    if status == MatchStatus.GFP:
+        qs = qs.filter(match__match_status=MatchStatus.GFP)
+    elif status == MatchStatus.PENDING:   # for a teller, "pending" is everything that is not verified yet
+        qs = qs.exclude(match__match_status=MatchStatus.GFP)
     if q:
         qs = qs.filter(Q(bank_reference_no__icontains=q) | Q(sender_name__icontains=q) | Q(account_holder_name__icontains=q))
     page = Paginator(qs, 20).get_page(request.GET.get("page"))
-    return render(request, "receipts/list.html", {"page": page, "status": status, "q": q, "statuses": MatchStatus.choices})
+    return render(request, "receipts/list.html", {"page": page, "status": status, "q": q, "statuses": [(MatchStatus.PENDING, "Pending"), (MatchStatus.GFP, "Verified")]})
 
 
 @role_required(Role.TELLER)
 def receipt_detail(request, pk: int):
     sub = get_object_or_404(TellerSubmission.objects.select_related("match", "bank", "branch", "submitted_by"),
                             pk=pk, branch=request.user.branch)
-    match: ReconciliationMatch = sub.match
-    return render(request, "receipts/detail.html", {
-        "sub": sub, "match": match, "comments": match.comments.select_related("author"),
-        "comment_form": CommentForm(), "can_edit": match.match_status in review.EDITABLE_STATUSES,
-    })
+    return render(request, "receipts/detail.html", {"sub": sub, "match": sub.match, "can_edit": sub.match.is_open})
 
 
 @role_required(Role.TELLER)
@@ -92,8 +90,8 @@ def receipt_edit(request, pk: int):
     """Teller fixes a receipt after Finance asked for a correction (REVIEW flow)."""
     sub = get_object_or_404(TellerSubmission.objects.select_related("match", "bank"), pk=pk, branch=request.user.branch)
     match = sub.match
-    if match.match_status not in review.EDITABLE_STATUSES:
-        messages.error(request, "This receipt can no longer be edited because it is verified, closed or still pending.")
+    if not match.is_open:
+        messages.error(request, "This receipt is verified and can no longer be edited.")
         return redirect("receipts:detail", pk=pk)
     initial = {"client_uuid": sub.client_uuid, "sender_name": sub.sender_name, "account_holder_name": sub.account_holder_name,
                "relationship": sub.relationship, "bank": sub.bank_id, "amount": sub.amount,
@@ -108,6 +106,6 @@ def receipt_edit(request, pk: int):
             return redirect("receipts:detail", pk=pk)
         run_matching(actor=request.user, match_ids=[match.pk], quiet=True)
         match.refresh_from_db()
-        messages.success(request, f"Receipt #{sub.pk} corrected and re-checked. New status: {match.get_match_status_display()}.")
+        messages.success(request, f"Receipt #{sub.pk} corrected. Status: {'Verified' if match.teller_status == 'gfp' else 'Pending'}.")
         return redirect("receipts:detail", pk=pk)
     return render(request, "receipts/edit.html", {"form": form, "branch": request.user.branch, "sub": sub, "editing": True})

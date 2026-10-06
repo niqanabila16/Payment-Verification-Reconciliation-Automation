@@ -1,37 +1,32 @@
 {% extends "base.html" %}{% load ui %}
-{% block title %}Import result{% endblock %}
-{% block topbar_title %}<strong>Bank statements</strong>{% endblock %}
+{% block title %}Upload result{% endblock %}
 {% block content %}
-<div class="page-head"><div><p class="xs mb-0"><a href="{% url 'reconciliation:import_list' %}">Bank statements</a> / {{ imp.file_name }}</p><h1>{{ imp.file_name }}</h1>
-  <p>{{ imp.bank.name }}, account {{ imp.account_number }}, statement as at {{ imp.statement_date|date:"d M Y" }}. Uploaded by {{ imp.uploaded_by.name|default:"-" }} on {{ imp.imported_at|date:"d M Y H:i" }}.</p></div></div>
+<div class="page-head"><div><p class="xs mb-0"><a href="{% url 'reconciliation:import_list' %}">Upload history</a> / {{ imp.file_name }}</p><h1>{{ imp.file_name }}</h1></div></div>
 
 {% if imp.status == "processing" %}
 <section class="card" data-import-progress data-status-url="{% url 'reconciliation:import_status' imp.pk %}"><div class="card__body" aria-live="polite">
-  <h2>{% icon "refresh" %} Reading the file and matching transactions...</h2>
-  <p class="muted small">This page updates by itself. You can leave it; the result stays available in the upload history.</p>
-  <div class="progress" role="progressbar" aria-label="Import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ imp.progress_percent }}"><div class="progress__bar" data-progress-bar data-value="{{ imp.progress_percent }}"></div></div>
+  <h2>{% icon "refresh" %} Matching transactions...</h2>
+  <div class="progress mt-1" role="progressbar" aria-label="Import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ imp.progress_percent }}"><div class="progress__bar" data-progress-bar data-value="{{ imp.progress_percent }}"></div></div>
   <p class="small mb-0 mt-1"><span data-progress-text>{{ imp.progress_percent }}%</span></p>
 </div></section>
 {% elif imp.status == "failed" %}
 <div class="alert alert--danger" role="alert">{% icon "x-circle" %}<div><span class="alert__title">Processing failed</span><p>{{ imp.error_message }}</p></div><span></span></div>
-<a class="btn btn--primary" href="{% url 'reconciliation:import_list' %}">Upload again</a>
+<a class="btn btn--primary" href="{% url 'reconciliation:queue' %}">Back to reconciliation</a>
 {% else %}
-<div class="alert alert--success" role="status">{% icon "check-circle" %}<div><span class="alert__title">Upload processed</span><p>{{ summary.rows_added }} new transaction row{{ summary.rows_added|pluralize }} added; {{ summary.evaluated }} Teller receipt{{ summary.evaluated|pluralize }} checked.</p></div><span></span></div>
 <div class="stat-row mb-1">
   <div class="stat"><span>{% icon "layers" %} New rows added</span><strong>{{ summary.rows_added }}</strong></div>
   <div class="stat stat--success"><span>{% icon "check-circle" %} Match (GFP)</span><strong>{{ summary.gfp }}</strong></div>
-  <div class="stat stat--warning"><span>{% icon "alert-triangle" %} Typo</span><strong>{{ summary.typo }}</strong></div>
-  <div class="stat stat--review"><span>{% icon "search" %} Manual review</span><strong>{{ summary.manual_review }}</strong></div>
+  <div class="stat stat--review"><span>{% icon "search" %} Review</span><strong>{{ review_count }}</strong></div>
   <div class="stat stat--danger"><span>{% icon "x-circle" %} Not found</span><strong>{{ summary.not_found }}</strong></div>
 </div>
 {% if summary.rows_skipped_overlap or summary.rows_skipped_duplicate_in_file or summary.invalid_count %}
 <div class="alert alert--warning" role="alert">{% icon "alert-triangle" %}<div><span class="alert__title">Some rows were skipped</span><ul>
-  {% if summary.rows_skipped_overlap %}<li>{{ summary.rows_skipped_overlap }} already imported earlier (overlapping period). They were not counted again.</li>{% endif %}
-  {% if summary.rows_skipped_duplicate_in_file %}<li>{{ summary.rows_skipped_duplicate_in_file }} repeated the same Bank Ref No. inside this file.</li>{% endif %}
+  {% if summary.rows_skipped_overlap %}<li>{{ summary.rows_skipped_overlap }} already imported before.</li>{% endif %}
+  {% if summary.rows_skipped_duplicate_in_file %}<li>{{ summary.rows_skipped_duplicate_in_file }} repeat a Bank Ref No. inside this file.</li>{% endif %}
   {% for reason in summary.rows_skipped_invalid %}<li>{{ reason }}</li>{% endfor %}
 </ul></div><span></span></div>
 {% endif %}
-{% if user.role == "finance" or user.role == "admin" %}<a class="btn btn--primary" href="{% url 'reconciliation:queue' %}">{% if attention %}Review {{ attention }} item{{ attention|pluralize }}{% else %}Open reconciliation{% endif %} {% icon "arrow-right" %}</a>{% endif %}
+<a class="btn btn--primary" href="{% url 'reconciliation:queue' %}">Open reconciliation {% icon "arrow-right" %}</a>
 {% endif %}
 {% endblock %}
-{% block scripts %}{% load static %}<script src="{% static 'js/import_progress.js' %}" defer></script>{% endblock %}
+{% block scripts %}{% load static %}<script src="{% static 'js/import_progress.js' %}?v=3" defer></script>{% endblock %}

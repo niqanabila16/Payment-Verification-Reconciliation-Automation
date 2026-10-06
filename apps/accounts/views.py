@@ -8,43 +8,50 @@ from django.contrib.auth.views import LoginView
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from apps.core.audit import record
 from apps.core.models import AuditLog
+from apps.core.notifications import notify_role
 from apps.core.permissions import role_required
 
-from . import throttle
-from .forms import LoginForm, UserForm
-from .models import Role, User
+from .forms import ForgotPasswordForm, LoginForm, UserForm
+from .models import PasswordResetRequest, Role, User
 
 
 class SignInView(LoginView):
-    """Sign-in with throttling and audit logging."""
+    """Sign-in with audit logging."""
 
     form_class = LoginForm
     template_name = "accounts/login.html"
     redirect_authenticated_user = True
 
-    def post(self, request, *args, **kwargs):
-        email = request.POST.get("username", "")
-        if throttle.is_locked(email):
-            form = self.get_form()
-            form.add_error(None, "Too many failed attempts. This account is locked temporarily. "
-                                 "Wait 15 minutes or ask an administrator for help.")
-            return self.render_to_response(self.get_context_data(form=form), status=429)
-        return super().post(request, *args, **kwargs)
-
     def form_valid(self, form):
-        throttle.clear(form.get_user().email)
         record("user", form.get_user().pk, "user.login", actor=form.get_user())
         return super().form_valid(form)
 
     def form_invalid(self, form):
-        email = self.request.POST.get("username", "")
-        throttle.register_failure(email)
-        record("user", 0, "user.login_failed", email=email)
+        record("user", 0, "user.login_failed", email=self.request.POST.get("username", ""))
         return super().form_invalid(form)
+
+
+def forgot_password(request):
+    """
+    Teller/Finance cannot change their own password, so they send a request to the Admin.
+    The answer is always the same, so the page never reveals whether an email address has an account.
+    """
+    form = ForgotPasswordForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        user = User.objects.filter(email__iexact=form.cleaned_data["email"], is_active=True).first()
+        if user and not PasswordResetRequest.objects.filter(user=user, handled_at__isnull=True).exists():
+            PasswordResetRequest.objects.create(user=user)
+            record("user", user.pk, "user.password_requested", actor=user)
+            notify_role(Role.ADMIN, "password_request", f"{user.name} ({user.email}) asks for a password reset.",
+                        "password_request", user.pk)
+        messages.success(request, "Request sent. An administrator will give you a new password.")
+        return redirect("accounts:login")
+    return render(request, "accounts/forgot_password.html", {"form": form})
 
 
 @require_POST
@@ -88,8 +95,9 @@ def user_list(request):
     elif state == "inactive":
         qs = qs.filter(is_active=False)
     page = Paginator(qs, 20).get_page(request.GET.get("page"))
+    requests = PasswordResetRequest.objects.filter(handled_at__isnull=True).select_related("user")
     return render(request, "accounts/user_list.html",
-                  {"page": page, "q": q, "role": role, "state": state, "roles": Role.choices})
+                  {"page": page, "q": q, "role": role, "state": state, "roles": Role.choices, "reset_requests": requests})
 
 
 @role_required(Role.ADMIN)
@@ -143,7 +151,8 @@ def user_reset_password(request, pk: int):
     password = generate_temporary_password()
     target.set_password(password)
     target.save(update_fields=["password"])
-    throttle.clear(target.email)
+    PasswordResetRequest.objects.filter(user=target, handled_at__isnull=True).update(
+        handled_at=timezone.now(), handled_by=request.user)
     record("user", target.pk, "user.password_reset", actor=request.user)
     return _credentials_page(request, target, password, "reset")
 

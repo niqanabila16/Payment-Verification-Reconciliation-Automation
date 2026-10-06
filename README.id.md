@@ -10,7 +10,7 @@ Dokumen lengkap ada di [README.md](README.md) (bahasa Inggris, sesuai BR-9). Ini
 ```powershell
 cd C:\path\ke\payment-reconciliation
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\scripts\setup.ps1      # buat venv, install paket, buat .env + secret key, migrate, isi data demo
+.\scripts\setup.ps1      # buat venv, install paket, buat .env + secret key, migrate, isi data 
 .\scripts\run.ps1        # jalankan di http://127.0.0.1:8000
 ```
 
