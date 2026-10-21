@@ -1,0 +1,47 @@
+{% load ui %}
+<nav class="tabs" aria-label="Receipt status">
+  {% for key, label, count in tabs %}<a href="{% querystring tab=key page=None %}" {% if key == tab %}aria-current="page"{% endif %}>{{ label }} <span class="count">{{ count }}</span></a>{% endfor %}
+</nav>
+
+{% if tab == "open_item" %}
+<div class="table-wrap"><table class="table">
+  <thead><tr><th>Bank</th><th>Date</th><th>Reference</th><th>Name</th><th>Transaction description</th><th class="num">Amount</th><th>File</th></tr></thead>
+  <tbody>
+  {% for e in page.object_list %}
+    <tr>
+      <td>{{ e.bank.name }}</td>
+      <td>{{ e.display_date|date:"d M Y" }}</td>
+      <td><span class="ref">{{ e.display_reference|default:"-" }}</span></td>
+      <td>{{ e.counterparty_name|default:"-" }}</td>
+      <td>{{ e.description|default:"-" }}{% if not e.matchable %}<span class="sub">Not reconciled: open item only</span>{% endif %}</td>
+      <td class="num">{{ e.amount|money }}<span class="sub">{{ e.direction }}</span></td>
+      <td><a href="{% url 'reconciliation:import_detail' e.statement_import_id %}">{{ e.statement_import.file_name }}</a><span class="sub">row {{ e.source_row }}</span></td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="7"><div class="empty">{% icon "check-circle" %}<h3>No open items</h3></div></td></tr>
+  {% endfor %}
+  </tbody></table></div>
+{% else %}
+<div class="table-wrap"><table class="table">
+  <thead><tr><th>Reference</th><th>Account holder</th><th class="num">Amount</th><th>Bank</th><th>Transaction</th><th>Status</th><th>Note</th><th><span class="visually-hidden">Detail</span></th></tr></thead>
+  <tbody>
+  {% for m in page.object_list %}
+    {% with s=m.teller_submission %}
+    <tr>
+      <td><a class="ref" href="{% url 'reconciliation:detail' m.pk %}">{{ s.bank_reference_no }}</a><span class="sub">#{{ s.pk }} - {{ s.payment_method_code|payment_method_label }}</span>
+        {% if m.review_entry %}{% ref_diff s.reference_normalized m.review_ref as d %}<span class="sub">Teller <span class="ref">{{ d.left }}</span></span><span class="sub">Bank <span class="ref">{{ d.right }}</span>{% if m.review_entry.amount != s.amount %} - {{ m.review_entry.amount|money }}{% endif %}</span>{% endif %}</td>
+      <td>{{ s.account_holder_name }}<span class="sub">{{ s.branch.code }} - {{ s.submitted_by.name|default:"-" }}</span></td>
+      <td class="num">{{ s.amount|money }}</td>
+      <td>{{ s.bank.name }}</td>
+      <td>{{ s.transaction_at|date:"d M Y H:i" }}</td>
+      <td>{% match_badge m %}</td>
+      <td class="note-cell">{{ m.finance_note|default:"" }}</td>
+      <td><a class="btn btn--sm" href="{% url 'reconciliation:detail' m.pk %}">Detail {% icon "arrow-right" %}</a></td>
+    </tr>
+    {% endwith %}
+  {% empty %}
+    <tr><td colspan="8"><div class="empty">{% icon "check-circle" %}<h3>No items</h3></div></td></tr>
+  {% endfor %}
+  </tbody></table></div>
+{% endif %}
+{% include "components/pagination.html" %}

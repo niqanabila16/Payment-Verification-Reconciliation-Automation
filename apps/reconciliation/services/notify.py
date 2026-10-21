@@ -13,8 +13,8 @@ def describe(sub) -> str:
 
 def notify_run_results(transitions, summary, quiet: bool = False) -> None:
     """
-    Tellers only have two states (Pending / Verified), so they are notified only when a receipt becomes
-    Verified. Finance gets ONE summary per run (not one ping per receipt).
+    Tellers are notified when a receipt becomes Verified (Pending and Review look the same to them; Reject has its own message,
+    sent by the review service). Finance gets ONE summary per run (not one ping per receipt).
     """
     per_teller = defaultdict(list)
     for match, decision in transitions:
@@ -27,7 +27,7 @@ def notify_run_results(transitions, summary, quiet: bool = False) -> None:
         send_digest_email(teller, "Payment reconciliation results", lines)
 
     if summary.evaluated and not quiet:
-        attention = summary.typo + summary.manual_review + summary.not_found
+        attention = summary.manual_review + summary.not_found
         notify_role(Role.FINANCE, "reconciliation_run",
-                    f"Reconciliation finished: {summary.gfp} verified, {summary.typo + summary.manual_review} review, "
+                    f"Reconciliation finished: {summary.gfp} verified, {summary.manual_review} review, "
                     f"{summary.not_found} not found. {attention} item(s) need attention.", "", None)

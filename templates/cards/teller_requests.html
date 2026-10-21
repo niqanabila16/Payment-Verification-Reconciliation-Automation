@@ -1,0 +1,57 @@
+{% extends "base.html" %}{% load ui static %}
+{% block title %}Card activation{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Card activation</h1></div>
+
+{% include "cards/_section_tabs.html" with active="requests" %}
+
+<section class="card mb-1" aria-labelledby="act-upload-title"><div class="card__head"><h2 id="act-upload-title">Request new card</h2></div><div class="card__body">
+  {% include "components/error_summary.html" %}
+  <form method="post" action="{% url 'cards:teller_submit' %}" enctype="multipart/form-data" novalidate data-card-request data-suggest-url="{% url 'cards:card_suggest' %}">{% csrf_token %}
+    <div class="field-grid">
+      {% include "components/field.html" with field=form.customer_name %}
+      {% include "components/field.html" with field=form.account_no %}
+      {% include "components/field.html" with field=form.id_no %}
+      {% include "components/field.html" with field=form.phone %}
+      {% include "components/field.html" with field=form.reason %}
+      <div class="field">
+        <label class="field__label" for="{{ form.card_suffix.id_for_label }}">Card No<span class="field__req" aria-hidden="true">*</span><span class="visually-hidden"> (required)</span></label>
+        {% if form.card_suffix.errors %}<div class="field__error" id="error-card_suffix">{% icon "x-circle" %}<span><span class="visually-hidden">Error: </span>{{ form.card_suffix.errors.0 }}</span></div>{% endif %}
+        <div class="bin-input"><span class="bin-input__prefix" aria-hidden="true">{{ form.bin }}</span>{{ form.card_suffix }}</div>
+        <datalist id="card-options"></datalist>
+      </div>
+      {% include "components/field.html" with field=form.file %}
+    </div>
+    <p class="mb-0"><button class="btn btn--primary" type="submit">{% icon "upload" %} Send to Customer service</button></p>
+  </form>
+</div></section>
+
+<div class="card card--flush" data-region="requests">
+  <div class="table-wrap"><table class="table" data-pdf-list>
+    <thead><tr><th>No</th><th>Customer</th><th>Card No</th><th>Sent</th><th>Status</th><th>Follow up</th><th>Note from Customer service</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+    <tbody>
+    {% for r in page.object_list %}
+      <tr>
+        <td>{{ page.start_index|add:forloop.counter0 }}</td>
+        <td><button class="link-button" type="button" data-pdf-url="{% url 'cards:request_file' r.pk %}" data-pdf-name="{{ r.customer_name|default:r.file_name }}">{% icon "file-text" %} {{ r.customer_name|default:r.file_name }}</button></td>
+        <td>{% if r.card %}<span class="ref">{{ r.card.card_no }}</span>{% else %}-{% endif %}</td>
+        <td>{{ r.submitted_at|date:"d M Y H:i" }}{% if r.resubmit_count %}<span class="sub">sent again {{ r.resubmit_count }}x</span>{% endif %}</td>
+        <td>{% include "cards/_status_badge.html" with tone=r.tone label=r.get_status_display %}</td>
+        <td>{{ r.get_follow_up_display|default:"-" }}</td>
+        <td>{{ r.note_text|default:"-" }}</td>
+        <td>{% if r.status == 3 and r.follow_up in resubmittable %}
+          <form method="post" action="{% url 'cards:teller_resubmit' r.pk %}" enctype="multipart/form-data" class="inline-form" data-ajax>{% csrf_token %}
+            <label class="visually-hidden" for="re-{{ r.pk }}">Corrected PDF for {{ r.customer_name|default:r.file_name }}</label>
+            <input class="input" id="re-{{ r.pk }}" type="file" name="file" accept="application/pdf,.pdf" required>
+            <button class="btn btn--sm btn--primary" type="submit">Send again</button>
+          </form>{% endif %}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="8"><div class="empty"><h3>No requests sent yet</h3></div></td></tr>
+    {% endfor %}
+    </tbody></table></div>
+  {% include "components/pagination.html" with page=page %}
+</div>
+{% include "cards/_pdf_modal.html" %}
+{% endblock %}
+{% block scripts %}<script src="{% static 'js/input_rules.js' %}?v=3" defer></script><script src="{% static 'js/pdf_preview.js' %}?v=1" defer></script><script src="{% static 'js/card_request.js' %}?v=1" defer></script>{% endblock %}

@@ -1,0 +1,23 @@
+{# Shared card table with shift-range multiselect. Needs: page, tab (slug), selectable (bool), form_id. #}
+<div class="table-wrap"><table class="table" data-card-table>
+  <thead><tr>
+    {% if selectable %}<th><input type="checkbox" data-select-all aria-label="Select all cards on this page"></th>{% endif %}
+    <th>No</th><th>Card No</th><th>Status</th><th>Date and time</th>{% if tab != "not_sent" %}<th>Branch</th>{% endif %}{% if tab == "accepted" %}<th>Date accepted</th>{% endif %}{% if tab == "collected" %}<th>Date collected</th>{% endif %}{% if tab == "blocked" %}<th>Reason</th><th>Date blocked</th>{% endif %}
+  </tr></thead>
+  <tbody>
+  {% for c in page.object_list %}
+    <tr>
+      {% if selectable %}<td><input type="checkbox" form="{{ form_id }}" name="card" value="{{ c.pk }}" data-row-check aria-label="Select card {{ c.card_no }}"></td>{% endif %}
+      <td>{{ page.start_index|add:forloop.counter0 }}</td>
+      <td><span class="ref">{{ c.card_no }}</span></td>
+      <td>{% include "cards/_status_badge.html" with tone=c.tone label=c.get_status_display %}</td>
+      <td>{{ c.shown_at|date:"d M Y H:i" }}</td>
+      {% if tab != "not_sent" %}<td>{{ c.branch.code|default:"-" }}</td>{% endif %}
+      {% if tab == "accepted" %}<td>{{ c.accepted_at|date:"d M Y H:i" }}</td>{% endif %}
+      {% if tab == "collected" %}<td>{{ c.collected_at|date:"d M Y H:i" }}</td>{% endif %}{% if tab == "blocked" %}<td>{{ c.block.note }}</td><td>{{ c.block.blocked_at|date:"d M Y H:i" }}</td>{% endif %}
+    </tr>
+  {% empty %}
+    <tr><td colspan="8"><div class="empty"><h3>No cards here</h3></div></td></tr>
+  {% endfor %}
+  </tbody></table></div>
+{% include "components/pagination.html" with page=page %}

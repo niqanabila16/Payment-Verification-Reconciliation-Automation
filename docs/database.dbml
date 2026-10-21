@@ -1,0 +1,247 @@
+// Paste into https://dbdiagram.io/d  (Import > DBML). Generated from the Django models (revision 3).
+// Reference: [ref: > X] = many-to-one, [ref: - X] = one-to-one.
+
+Project payment_reconciliation {
+  database_type: 'PostgreSQL'
+  Note: 'Teller receipts vs bank statements, plus card activation'
+}
+
+// ---------------------------------------------------------------- Accounts
+Table accounts_branch {
+  id bigint [pk, increment]
+  code varchar(10) [unique, note: 'e.g. KJ, PJ']
+  name varchar(100)
+  is_active boolean
+  created_at timestamptz
+  Note: 'A company branch (master data). Tellers belong to exactly one branch.'
+}
+
+Table accounts_user {
+  id bigint [pk, increment]
+  email varchar(150) [unique, note: 'login']
+  password varchar(128) [note: 'hashed']
+  name varchar(150)
+  role varchar(10) [note: 'teller | finance | admin | cs']
+  branch_id bigint [null, ref: > accounts_branch.id, note: 'required for teller, empty for the other roles (PROTECT)']
+  is_active boolean
+  is_superuser boolean
+  last_login timestamptz [null]
+  created_at timestamptz
+  Note: 'Every person who signs in. The role decides which screens are allowed.'
+}
+
+// ---------------------------------------------------------------- Master data
+Table core_bank {
+  id bigint [pk, increment]
+  code varchar(20) [unique, note: 'RHB, ALB, PBB, MBB']
+  name varchar(100)
+  statement_format varchar(10) [note: 'which statement reader parses its file']
+  is_active boolean
+  created_at timestamptz
+}
+
+Table core_paymentmethod {
+  id bigint [pk, increment]
+  code varchar(10) [unique]
+  name varchar(100)
+  is_active boolean
+  created_at timestamptz
+  Note: 'Dropdown values. Receipts store only the code (text), so renaming never breaks history.'
+}
+
+Table core_relationship {
+  id bigint [pk, increment]
+  code varchar(50) [unique]
+  name varchar(100)
+  is_active boolean
+  created_at timestamptz
+  Note: 'Dropdown: sender relationship to the account holder. Receipts store the code.'
+}
+
+Table core_transactiondescription {
+  id bigint [pk, increment]
+  code varchar(120) [unique, note: 'derived from name']
+  name varchar(100) [note: 'exactly as the bank prints it']
+  bank_id bigint [null, ref: > core_bank.id, note: 'empty = offered for every bank (CASCADE)']
+  is_active boolean
+  created_at timestamptz
+  Note: 'Options of the Finance "Transaction description" filter, managed by Admin.'
+}
+
+// ---------------------------------------------------------------- Teller receipts
+Table receipts_tellersubmission {
+  id bigint [pk, increment]
+  client_uuid uuid [unique, note: 'made in the browser: offline sync can never create duplicates']
+  branch_id bigint [not null, ref: > accounts_branch.id, note: 'from the login session (PROTECT)']
+  submitted_by_id bigint [null, ref: > accounts_user.id, note: 'the ONE teller who entered it (SET NULL)']
+  sender_name varchar(150)
+  account_holder_name varchar(150) [note: 'compared with the bank name']
+  relationship varchar(50) [note: 'code of core_relationship']
+  bank_id bigint [not null, ref: > core_bank.id, note: 'PROTECT']
+  amount decimal(12,2)
+  bank_reference_no varchar(50) [note: 'as typed; used for the report and the duplicate check']
+  reference_normalized varchar(50) [note: 'letters/digits upper case']
+  payment_method_code varchar(10) [note: 'code of core_paymentmethod']
+  transaction_at timestamptz [note: 'time printed on the receipt']
+  entered_at timestamptz
+  sync_status varchar(20) [note: 'synced | queued offline']
+  synced_at timestamptz [null]
+  previous_versions jsonb [note: 'fingerprints of earlier versions (correction after Reject)']
+
+  indexes {
+    (branch_id, entered_at) [name: 'sub_branch_entered_idx']
+    (reference_normalized, amount) [name: 'sub_ref_amount_idx']
+    (bank_id, entered_at) [name: 'sub_bank_entered_idx']
+    transaction_at [name: 'sub_txn_at_idx']
+  }
+  Note: 'One row = one payment receipt reported by a Teller.'
+}
+
+// ---------------------------------------------------------------- Bank statements
+Table reconciliation_statementimport {
+  id bigint [pk, increment]
+  bank_id bigint [not null, ref: > core_bank.id]
+  account_number varchar(30)
+  account_label varchar(100)
+  statement_date date
+  file_name varchar(255)
+  file_sha256 varchar(64) [note: 'same file uploaded twice is detected']
+  file_format varchar(10) [note: 'csv | xlsx']
+  row_count int [null]
+  status varchar(20) [note: 'processing | processed | failed']
+  imported_at timestamptz [note: 'retention clock: deleted after 31 days']
+  uploaded_by_id bigint [null, ref: > accounts_user.id]
+  progress_percent smallint
+  error_message text
+  result_summary jsonb
+  Note: 'One row = one bank statement file uploaded by Finance (upload history).'
+}
+
+Table reconciliation_statemententry {
+  id bigint [pk, increment]
+  statement_import_id bigint [not null, ref: > reconciliation_statementimport.id, note: 'CASCADE: purge deletes the rows with the file']
+  bank_id bigint [not null, ref: > core_bank.id, note: 'copied from the import for fast filtering']
+  description varchar(100) [note: 'transaction description of the bank']
+  debit_amount decimal(14,2) [null]
+  credit_amount decimal(14,2) [null]
+  amount decimal(14,2) [note: 'credit or debit, whichever is filled']
+  transaction_date date [null]
+  counterparty_name varchar(150) [note: 'name used for matching']
+  reference varchar(150) [note: 'as shown (QR..., RPP..., cheque no)']
+  bank_ref_no varchar(50) [note: 'unique key of the row inside the file']
+  reference_normalized varchar(150)
+  matchable boolean [note: 'false = Open Item straight away (not reconciled type)']
+  source_row int [null]
+
+  indexes {
+    (statement_import_id, bank_ref_no) [unique, name: 'uniq_ref_per_import']
+    (bank_id, amount) [name: 'entry_bank_amount_idx']
+    bank_ref_no [name: 'entry_bankref_idx']
+    transaction_date [name: 'entry_txn_date_idx']
+  }
+  Note: 'One row = one transaction line of a statement (only the extracted columns).'
+}
+
+// ---------------------------------------------------------------- The match (heart of the system)
+Table reconciliation_reconciliationmatch {
+  id bigint [pk, increment]
+  teller_submission_id bigint [unique, not null, ref: - receipts_tellersubmission.id, note: 'exactly one match row per receipt (CASCADE)']
+  bank_statement_entry_id bigint [unique, null, ref: - reconciliation_statemententry.id, note: 'FINAL link (GFP). Unique: one bank row serves one receipt (SET NULL)']
+  suggested_bank_statement_entry_id bigint [null, ref: > reconciliation_statemententry.id, note: 'Review suggestion (not final)']
+  rejected_bank_statement_entry_id bigint [null, ref: > reconciliation_statemententry.id, note: 'row compared when Finance rejected']
+  bank_snapshot jsonb [note: 'copy of the bank row kept for GFP after the bank data is purged']
+  review_reasons jsonb [note: 'why Review, e.g. ["amount"]']
+  match_type varchar(20) [note: 'auto_exact | manual']
+  match_score decimal(5,2) [null]
+  match_status varchar(20) [note: 'pending | gfp | review (manual_review) | not_found | rejected']
+  first_seen_at timestamptz
+  status_changed_at timestamptz
+  last_attempt_at timestamptz [null]
+  attempt_count int
+  matched_by_id bigint [null, ref: > accounts_user.id, note: 'finance user who decided']
+  matched_at timestamptz [null]
+  notes text [note: 'system explanation']
+  finance_note text [note: 'note written by Finance (shown to the Teller on Reject)']
+
+  indexes {
+    (match_status, status_changed_at) [name: 'match_status_recent_idx']
+  }
+  Note: 'The status and the link between ONE receipt and (at most) ONE bank row.'
+}
+
+// ---------------------------------------------------------------- Card activation
+Table cards_cardupload {
+  id bigint [pk, increment]
+  file_name varchar(255)
+  file_sha256 varchar(64)
+  uploaded_by_id bigint [null, ref: > accounts_user.id, note: 'CS user']
+  uploaded_at timestamptz
+  card_count int
+  Note: 'One row = one card file uploaded by Customer service.'
+}
+
+Table cards_card {
+  id bigint [pk, increment]
+  upload_id bigint [not null, ref: > cards_cardupload.id, note: 'CASCADE']
+  position int [note: 'row order inside the file; lists keep this order']
+  card_no varchar(40) [unique]
+  status varchar(20) [note: 'not_sent | delivered | accepted']
+  branch_id bigint [null, ref: > accounts_branch.id, note: 'destination branch once delivered']
+  created_at timestamptz [note: 'upload time (shown while Not Sent)']
+  delivered_at timestamptz [null]
+  delivered_by_id bigint [null, ref: > accounts_user.id]
+  accepted_at timestamptz [null]
+  accepted_by_id bigint [null, ref: > accounts_user.id, note: 'teller who confirmed']
+
+  indexes {
+    (branch_id, status) [name: 'card_branch_status_idx']
+  }
+  Note: 'One row = one physical card number.'
+}
+
+Table cards_activationrequest {
+  id bigint [pk, increment]
+  branch_id bigint [not null, ref: > accounts_branch.id]
+  submitted_by_id bigint [null, ref: > accounts_user.id, note: 'teller']
+  file varchar(100) [note: 'path of the PDF in media/']
+  file_name varchar(255) [note: 'original name = customer identity']
+  submitted_at timestamptz
+  status varchar(30) [note: 'sent | activation_requested | activated | rejected']
+  cs_note text
+  status_changed_at timestamptz
+  handled_by_id bigint [null, ref: > accounts_user.id, note: 'CS user']
+  resubmit_count int
+
+  indexes {
+    (branch_id, submitted_at) [name: 'actreq_branch_idx']
+  }
+  Note: 'One row = one customer PDF sent by a Teller for card activation.'
+}
+
+// ---------------------------------------------------------------- Cross-cutting
+Table core_auditlog {
+  id bigint [pk, increment]
+  entity_type varchar(50)
+  entity_id bigint
+  action varchar(50)
+  actor_id bigint [null, ref: > accounts_user.id, note: 'SET NULL']
+  payload jsonb
+  created_at timestamptz
+  indexes { (entity_type, entity_id) }
+  Note: 'Append-only trail: updates and deletes are blocked in code.'
+}
+
+Table core_notification {
+  id bigint [pk, increment]
+  recipient_id bigint [null, ref: > accounts_user.id, note: 'CASCADE']
+  recipient_role varchar(10) [note: 'broadcast to a whole role']
+  channel varchar(10)
+  type varchar(50)
+  related_entity_type varchar(50)
+  related_entity_id bigint [null]
+  message text
+  status varchar(20)
+  created_at timestamptz
+  read_at timestamptz [null]
+  indexes { (recipient_id, status) }
+}

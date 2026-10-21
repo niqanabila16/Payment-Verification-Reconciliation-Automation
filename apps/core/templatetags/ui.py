@@ -14,9 +14,9 @@ register = template.Library()
 STATUS_STYLES = {
     "pending": ("Pending", "warning", "clock"),
     "gfp": ("Verified (GFP)", "success", "check-circle"),
-    "typo": ("Review: typo", "review", "search"),
-    "manual_review": ("Review: amount differs", "review", "search"),
-    "not_found": ("Not found", "danger", "x-circle"),
+    "manual_review": ("Review", "review", "search"),
+    "not_found": ("Not found", "neutral", "info"),
+    "rejected": ("Reject", "danger", "x-circle"),
 }
 
 
@@ -35,9 +35,17 @@ def status_badge(status: str) -> str:
 
 
 @register.simple_tag
+def match_badge(match) -> str:
+    """Finance badge of a match; Review names the field that differs ("Review: amount differs")."""
+    if match.match_status == "manual_review":
+        return format_html('<span class="badge badge--review">{}<span>{}</span></span>', icon("search"), match.review_label)
+    return status_badge(match.match_status)
+
+
+@register.simple_tag
 def teller_badge(status: str) -> str:
-    """Tellers only see two states: Verified, or Pending for anything else."""
-    return status_badge("gfp" if status == "gfp" else "pending")
+    """Tellers see Verified, Reject, or Pending for anything else."""
+    return status_badge(status if status in ("gfp", "rejected") else "pending")
 
 
 @register.filter
@@ -63,6 +71,13 @@ def money(value) -> str:
     return f"RM {Decimal(value):,.2f}"
 
 
+@register.filter
+def split_ref(value) -> list:
+    """'Sherbeauty/RPP260828309298185/INARA GROUP SDN. BHD' -> ['Sherbeauty', 'RPP260828309298185', 'INARA GROUP SDN. BHD'].
+    Every "/" in a bank reference separates a different value."""
+    return [part.strip() for part in str(value or "").split("/") if part.strip()]
+
+
 @register.simple_tag
 def ref_diff(left: str, right: str) -> dict:
     """
@@ -83,3 +98,15 @@ def ref_diff(left: str, right: str) -> dict:
             out_right.append(format_html('<mark class="chardiff">{}</mark>', right[j1:j2]))
     return {"left": mark_safe("".join(out_left)), "right": mark_safe("".join(out_right)),
             "same": left == right}
+
+# ---- card dashboard helpers (templates/cards/_dashboard.html) -------------------------------------------------------
+@register.filter
+def branch_key(branch: dict, field: str) -> str:
+    """The id the live refresh uses to find a number: b<branch id>.<field>."""
+    return f"b{branch['id']}.{field}"
+
+
+@register.filter
+def dash_value(value, empty):
+    """A branch that never received a card shows "-" instead of zeros."""
+    return "-" if empty else value

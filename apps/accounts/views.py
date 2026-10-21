@@ -2,22 +2,25 @@
 import secrets
 import string
 
+from django.conf import settings
+import time
+
 from django.contrib import messages
+from django.core.cache import cache
 from django.contrib.auth import logout
-from django.contrib.auth.views import LoginView
+from django.contrib.auth.views import LoginView, PasswordResetConfirmView, PasswordResetView
 from django.core.paginator import Paginator
+from django.urls import reverse_lazy
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from apps.core.audit import record
 from apps.core.models import AuditLog
-from apps.core.notifications import notify_role
 from apps.core.permissions import role_required
 
-from .forms import ForgotPasswordForm, LoginForm, UserForm
-from .models import PasswordResetRequest, Role, User
+from .forms import ForgotPasswordForm, LoginForm, NewPasswordForm, UserForm
+from .models import Role, User
 
 
 class SignInView(LoginView):
@@ -36,22 +39,83 @@ class SignInView(LoginView):
         return super().form_invalid(form)
 
 
-def forgot_password(request):
-    """
-    Teller/Finance cannot change their own password, so they send a request to the Admin.
-    The answer is always the same, so the page never reveals whether an email address has an account.
-    """
-    form = ForgotPasswordForm(request.POST or None)
-    if request.method == "POST" and form.is_valid():
-        user = User.objects.filter(email__iexact=form.cleaned_data["email"], is_active=True).first()
-        if user and not PasswordResetRequest.objects.filter(user=user, handled_at__isnull=True).exists():
-            PasswordResetRequest.objects.create(user=user)
-            record("user", user.pk, "user.password_requested", actor=user)
-            notify_role(Role.ADMIN, "password_request", f"{user.name} ({user.email}) asks for a password reset.",
-                        "password_request", user.pk)
-        messages.success(request, "Request sent. An administrator will give you a new password.")
-        return redirect("accounts:login")
-    return render(request, "accounts/forgot_password.html", {"form": form})
+class ForgotPasswordView(PasswordResetView):
+    """Sends the reset link by e-mail (see templates/accounts/password_reset_email.txt)."""
+
+    form_class = ForgotPasswordForm
+    template_name = "accounts/forgot_password.html"
+    email_template_name = "accounts/password_reset_email.txt"
+    subject_template_name = "accounts/password_reset_subject.txt"
+    success_url = reverse_lazy("accounts:forgot_password_sent")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["minutes"] = settings.PASSWORD_RESET_TIMEOUT // 60
+        return context
+
+    def form_valid(self, form):
+        self.extra_email_context = {"base_url": settings.SITE_BASE_URL, "minutes": settings.PASSWORD_RESET_TIMEOUT // 60}
+        response = super().form_valid(form)   # Django logs (and hides) an SMTP failure so the page cannot reveal which addresses exist
+        record("user", 0, "user.password_reset_requested", email=form.cleaned_data["email"])
+        self.request.session[RESET_EMAIL_KEY] = form.cleaned_data["email"].strip().lower()
+        self.request.session["password-reset-resend-at"] = int(time.time())
+        return response
+
+
+RESET_EMAIL_KEY = "password-reset-email"
+RESEND_SECONDS = 60
+
+
+def _mask(email: str) -> str:
+    name, _, domain = email.partition("@")
+    return (name[:2] + "*" * max(len(name) - 2, 1)) + "@" + domain
+
+
+def forgot_password_sent(request):
+    """"Check your email" page: where the link was sent, a Resend button (60 s cooldown) and the way back."""
+    email = request.session.get(RESET_EMAIL_KEY)
+    if not email:
+        return redirect("accounts:forgot_password")
+    console = settings.DEBUG and settings.EMAIL_BACKEND.endswith("console.EmailBackend")
+    resend_in = max(0, RESEND_SECONDS - (int(time.time()) - request.session.get("password-reset-resend-at", 0)))
+    return render(request, "accounts/forgot_password_sent.html", {
+        "email": _mask(email), "minutes": settings.PASSWORD_RESET_TIMEOUT // 60, "console_mail": console, "resend_in": resend_in})
+
+
+@require_POST
+def forgot_password_resend(request):
+    email = request.session.get(RESET_EMAIL_KEY)
+    if not email:
+        return redirect("accounts:forgot_password")
+    now = int(time.time())
+    last = request.session.get("password-reset-resend-at", 0)
+    if now - last < RESEND_SECONDS:
+        messages.error(request, f"Please wait {RESEND_SECONDS - (now - last)} seconds before sending the link again.")
+        return redirect("accounts:forgot_password_sent")
+    cache.delete(f"password-reset-sent:{email}")          # the anti-flood marker is ours to reset: the 60 s rule above replaces it
+    form = ForgotPasswordForm({"email": email})
+    if form.is_valid():
+        form.save(request=request, email_template_name="accounts/password_reset_email.txt", subject_template_name="accounts/password_reset_subject.txt",
+                  extra_email_context={"base_url": settings.SITE_BASE_URL, "minutes": settings.PASSWORD_RESET_TIMEOUT // 60})
+        record("user", 0, "user.password_reset_requested", email=email, resend=True)
+    request.session["password-reset-resend-at"] = now
+    messages.success(request, "The link was sent again.")
+    return redirect("accounts:forgot_password_sent")
+
+
+class NewPasswordView(PasswordResetConfirmView):
+    """The page opened from the e-mailed link: new password + confirmation."""
+
+    form_class = NewPasswordForm
+    template_name = "accounts/password_reset_confirm.html"
+    success_url = reverse_lazy("accounts:login")
+    post_reset_login = False
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        record("user", form.user.pk, "user.password_reset_by_email", actor=form.user)
+        messages.success(self.request, "Your password was changed. Sign in with the new password.")
+        return response
 
 
 @require_POST
@@ -95,9 +159,10 @@ def user_list(request):
     elif state == "inactive":
         qs = qs.filter(is_active=False)
     page = Paginator(qs, 20).get_page(request.GET.get("page"))
-    requests = PasswordResetRequest.objects.filter(handled_at__isnull=True).select_related("user")
-    return render(request, "accounts/user_list.html",
-                  {"page": page, "q": q, "role": role, "state": state, "roles": Role.choices, "reset_requests": requests})
+    context = {"page": page, "q": q, "role": role, "state": state, "roles": Role.choices}
+    if request.headers.get("X-Live-Search"):   # live search: only the part that changes
+        return render(request, "accounts/_user_results.html", context)
+    return render(request, "accounts/user_list.html", context)
 
 
 @role_required(Role.ADMIN)
@@ -105,7 +170,7 @@ def user_create(request):
     form = UserForm(request.POST or None)
     if request.method == "POST" and form.is_valid():
         password = generate_temporary_password()
-        user = User.objects.create_user(password=password, **{k: v for k, v in form.cleaned_data.items()})
+        user = User.objects.create_user(password=password, **{k: v for k, v in form.cleaned_data.items() if k != "cs_rights"})
         record("user", user.pk, "user.created", actor=request.user, role=user.role, email=user.email)
         return _credentials_page(request, user, password, "created")
     return render(request, "accounts/user_form.html", {"form": form, "mode": "create"})
@@ -116,13 +181,13 @@ def user_edit(request, pk: int):
     target = get_object_or_404(User, pk=pk)
     form = UserForm(request.POST or None, instance=target)
     if request.method == "POST" and form.is_valid():
-        before = {"role": target.role, "branch": target.branch_id}
+        before = {"role": target.role, "branch": target.branch_id, "cs_permissions": target.cs_permissions}
         if target.pk == request.user.pk and form.cleaned_data["role"] != Role.ADMIN:
             form.add_error("role", "You cannot remove your own Admin role. Ask another administrator to change it.")
         else:
             user = form.save()
             record("user", user.pk, "user.updated", actor=request.user, before=before,
-                   after={"role": user.role, "branch": user.branch_id})
+                   after={"role": user.role, "branch": user.branch_id, "cs_permissions": user.cs_permissions})
             messages.success(request, f"Saved changes for {user.name}.")
             return redirect("accounts:user_list")
     return render(request, "accounts/user_form.html", {"form": form, "mode": "edit", "target": target})
@@ -145,14 +210,36 @@ def user_toggle_active(request, pk: int):
 
 @role_required(Role.ADMIN)
 @require_POST
+def user_delete(request, pk: int):
+    """
+    Delete a user that is no longer needed. A user who already reported receipts cannot be deleted
+    (the receipts would lose who reported them); deactivate that account instead.
+    """
+    from apps.receipts.models import TellerSubmission
+
+    target = get_object_or_404(User, pk=pk)
+    if target.pk == request.user.pk:
+        messages.error(request, "You cannot delete your own account.")
+        return redirect("accounts:user_list")
+    used = TellerSubmission.objects.filter(submitted_by=target).count()
+    if used:
+        messages.error(request, f"{target.name} reported {used} receipt(s), so the account cannot be deleted. Deactivate it instead.")
+        return redirect("accounts:user_list")
+    name, email = target.name, target.email
+    target.delete()
+    record("user", pk, "user.deleted", actor=request.user, email=email)
+    messages.success(request, f"{name} was deleted.")
+    return redirect("accounts:user_list")
+
+
+@role_required(Role.ADMIN)
+@require_POST
 def user_reset_password(request, pk: int):
     """Admin-only password reset (users cannot change or reset their own password)."""
     target = get_object_or_404(User, pk=pk)
     password = generate_temporary_password()
     target.set_password(password)
     target.save(update_fields=["password"])
-    PasswordResetRequest.objects.filter(user=target, handled_at__isnull=True).update(
-        handled_at=timezone.now(), handled_by=request.user)
     record("user", target.pk, "user.password_reset", actor=request.user)
     return _credentials_page(request, target, password, "reset")
 
@@ -165,4 +252,6 @@ def audit_log(request):
     if q:
         qs = qs.filter(Q(action__icontains=q) | Q(entity_type__icontains=q) | Q(actor__name__icontains=q))
     page = Paginator(qs, 30).get_page(request.GET.get("page"))
+    if request.headers.get("X-Live-Search"):
+        return render(request, "accounts/_audit_results.html", {"page": page, "q": q})
     return render(request, "accounts/audit_log.html", {"page": page, "q": q})

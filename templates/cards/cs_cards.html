@@ -1,0 +1,40 @@
+{% extends "base.html" %}{% load ui static %}
+{% block title %}Cards{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Cards</h1></div>
+
+{% if can_batch %}
+<section class="card mb-1" aria-label="Add card batch"><div class="card__body">
+  <form method="post" action="{% url 'cards:cs_upload' %}" enctype="multipart/form-data" class="upload-row">{% csrf_token %}
+    {% include "components/field.html" with field=upload_form.file %}
+    <button class="btn btn--primary" type="submit">{% icon "upload" %} Add card batch</button>
+  </form>
+</div></section>
+{% endif %}
+
+<div class="card card--flush" data-region="cards">
+  {% include "cards/_tabs.html" %}
+  <form class="filters" method="get" role="search" data-ajax-get>
+    <input type="hidden" name="tab" value="{{ tab }}">
+    <input class="input input--grow" name="q" type="search" value="{{ q }}" placeholder="Search card number" aria-label="Search card number">
+    <button class="btn" type="submit">{% icon "search" %} Search</button>
+  </form>
+  {% if can_batch and tab == "not_sent" %}
+  <form method="post" action="{% url 'cards:cs_deliver' %}" id="deliver-form" class="filters" data-card-actions data-ajax>{% csrf_token %}
+    <span class="selected" data-selected-count aria-live="polite">0 selected</span>
+    <select class="input" name="branch" required aria-label="Destination branch"><option value="">Destination branch</option>{% for b in deliver_branches %}<option value="{{ b.pk }}">{{ b.code }}{% if b.name %} - {{ b.name }}{% endif %}</option>{% endfor %}</select>
+    <button class="btn btn--primary" type="submit" data-needs-selection disabled>Deliver selected</button>
+  </form>
+  {% endif %}
+  {% if can_block and tab == "delivered" or can_block and tab == "accepted" %}
+  <form method="post" action="{% url 'cards:cs_block' %}" id="block-form" class="filters" data-card-actions data-ajax>{% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <span class="selected" data-selected-count aria-live="polite">0 selected</span>
+    <input class="input input--grow" name="note" type="text" required minlength="3" maxlength="255" placeholder="Reason for blocking" aria-label="Reason for blocking">
+    <button class="btn btn--danger" type="submit" data-needs-selection disabled>Block selected</button>
+  </form>
+  {% endif %}
+  {% include "cards/_card_table.html" with selectable=selectable form_id=form_id %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="{% static 'js/card_select.js' %}?v=3" defer></script>{% endblock %}

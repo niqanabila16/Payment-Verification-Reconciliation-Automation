@@ -11,6 +11,7 @@ urlpatterns = [
     path("manage/master-data/<slug:kind>/", master.master_list, name="master_list"),
     path("manage/master-data/<slug:kind>/<int:pk>/edit/", master.master_edit, name="master_edit"),
     path("manage/master-data/<slug:kind>/<int:pk>/toggle/", master.master_toggle, name="master_toggle"),
+    path("manage/master-data/<slug:kind>/<int:pk>/delete/", master.master_delete, name="master_delete"),
     path("sw.js", views.service_worker, name="service_worker"),
     path("healthz/", views.healthz, name="healthz"),
 ]

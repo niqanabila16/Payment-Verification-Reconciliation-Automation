@@ -1,0 +1,2 @@
+{# One dashboard number. Needs: label, key (data-m), value; optional tone ("danger" = red when above zero). #}
+<div class="metric"><dt class="metric__label">{{ label }}</dt><dd class="metric__value"><span data-m="{{ key }}" {% if tone %}data-tone="{{ tone }}"{% endif %}{% if value == 0 or value == "-" %} data-zero{% endif %}>{{ value }}</span></dd></div>

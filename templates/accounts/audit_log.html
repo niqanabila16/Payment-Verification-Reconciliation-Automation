@@ -3,19 +3,9 @@
 {% block content %}
 <div class="page-head"><h1>Audit trail</h1></div>
 <div class="card card--flush">
-  <form class="filters" method="get" role="search"><label class="visually-hidden" for="q">Filter</label>
-    <input class="input input--grow" id="q" name="q" type="search" value="{{ q }}" placeholder="Filter by action, record type or person">
-    <button class="btn btn--sm" type="submit">{% icon "search" %} Filter</button></form>
-  <div class="table-wrap"><table class="table">
-    <thead><tr><th>When</th><th>Action</th><th>Record</th><th>By</th><th>Details</th></tr></thead>
-    <tbody>
-    {% for e in page.object_list %}
-      <tr><td class="num">{{ e.created_at|date:"d M Y H:i:s" }}</td><td><code>{{ e.action }}</code></td><td>{{ e.entity_type }} #{{ e.entity_id }}</td><td>{{ e.actor.name|default:"System" }}</td>
-          <td class="small muted">{% for k, v in e.payload.items %}{{ k }}: {{ v }}{% if not forloop.last %}; {% endif %}{% endfor %}</td></tr>
-    {% empty %}
-      <tr><td colspan="5"><div class="empty">{% icon "activity" %}<h3>No entries yet</h3></div></td></tr>
-    {% endfor %}
-    </tbody></table></div>
-  {% include "components/pagination.html" %}
+  <form class="filters" method="get" role="search" data-live-search><label class="visually-hidden" for="q">Filter</label>
+    <input class="input input--grow" id="q" name="q" type="search" value="{{ q }}" placeholder="Filter by action, record type or person" autocomplete="off">
+    <button class="visually-hidden" type="submit">Filter</button></form>
+  <div data-live-results>{% include "accounts/_audit_results.html" %}</div>
 </div>
 {% endblock %}

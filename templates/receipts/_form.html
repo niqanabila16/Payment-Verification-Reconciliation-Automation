@@ -2,7 +2,8 @@
 {# The receipt form. Rendered on the page and, after a failed AJAX submit, re-rendered by the server (JSON "html"). #}
 <form method="post" id="receipt-form" novalidate {% if not editing %}data-receipt-form{% endif %}>
   {% csrf_token %}
-  {% include "components/error_summary.html" %}
+  {# A duplicate is shown in the pop-up only; the summary is kept when editing (no pop-up there) or when other fields also have errors. #}
+  {% if editing or not form.duplicate_only %}{% include "components/error_summary.html" %}{% endif %}
   <div class="card__body">
     {{ form.client_uuid }}{{ form.entered_at }}
     <div class="field-grid">
@@ -12,6 +13,7 @@
       {% include "components/field.html" with field=form.payment_method_code %}
       {% include "components/field.html" with field=form.bank %}
       {% include "components/field.html" with field=form.amount %}
+      {% include "components/field.html" with field=form.transaction_at %}
     </div>
     {% include "components/field.html" with field=form.bank_reference_no %}
   </div>

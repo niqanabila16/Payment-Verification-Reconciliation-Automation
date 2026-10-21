@@ -14,9 +14,9 @@ Reference links are at the end. The CSS lives in `static/css/app.css`; reusable 
 | An action failed or a rule blocked it | Danger alert, not auto-hidden | `role="alert"` | Until the page changes | "That bank row is already linked to another receipt..." |
 | Something needs the user's attention but nothing failed | Warning alert | `role="alert"` | Until dismissed | "Some rows were skipped" after an import |
 | Neutral information | Info alert | `role="status"` | Dismissible | "Outside Finance working hours" |
-| Risky or irreversible action (deactivate, close, link, reset password) | **Confirmation dialog** that names the consequence | native `<dialog>` modal, focus on Cancel | Until answered | `components/confirm_dialog.html` |
+| Risky or irreversible action (deactivate, approve, reject, reset password, upload an already-uploaded file) | **Confirmation dialog** that names the consequence | native `<dialog>` modal, focus on Cancel | Until answered | `components/confirm_dialog.html` |
 | Long operation | Progress bar with percentage text | `role="progressbar"`, `aria-valuenow`, `aria-live` | Until done | Statement import |
-| Connection lost | Status pill in the top bar + local-save message | `role="status"` | While offline | Offline receipt queue |
+| Receipt saved on this computer (server unreachable) | Warning alert + "Waiting to sync" card | `role="alert"` / `aria-live` | Until synced | Offline receipt queue |
 | Nothing to show | Empty state with a next step | - | - | "Nothing needs attention" |
 
 Severity vocabulary is fixed: **info, success, warning, danger**. Every alert has an **icon, a title and text**, so colour is never the only signal (WCAG 1.4.1).
@@ -51,8 +51,7 @@ x Error message              <- only when invalid: icon + "Error:" (screen reade
 | Card | Anatomy | Used for |
 |---|---|---|
 | Content card | Header (title + action), body, optional footer with actions | Forms, lists, details |
-| KPI card | Label with icon, large number, one-line note | Reconciliation overview |
-| Stat card | Icon + label + number, tinted by outcome | Upload summary |
+| Stat card | Icon + label + number, tinted by outcome | Upload result |
 | Comparison table | Field, Teller value, Bank value; row tint + flag | Review screen |
 
 Row states in the comparison: **green = identical, red = different, neutral = for information**, always with the words "Identical" / "Differs".
@@ -62,14 +61,20 @@ The reference field adds a character-level diff (`<mark class="chardiff">`: bold
 
 | Status | Badge | Icon |
 |---|---|---|
-| Pending | grey | clock |
+| Pending | yellow | clock |
 | Verified (GFP) | green | check-circle |
-| Typo suspected | amber | alert-triangle |
-| Manual review | violet | search |
+| Review (amount differs) | violet | search |
+| Reject | red | x-circle |
 | Not found | red | x-circle |
-| Closed | muted grey | lock |
 
-## 6. Accessibility checklist for every new screen
+Tellers see only Pending (yellow) and Verified (green).
+
+## 6. Content rules
+
+* No explanatory paragraphs under headings; a page is a title plus the work. Keep text only where a user must act on it (errors, warnings, confirmation dialogs).
+* Every control must do something. No decorative toggles or status pills.
+
+## 7. Accessibility checklist for every new screen
 
 - [ ] One `<h1>`, landmarks (`header`, `nav`, `main`), skip link works
 - [ ] All controls reachable and operable by keyboard; focus ring visible

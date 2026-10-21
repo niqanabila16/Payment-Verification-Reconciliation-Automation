@@ -8,6 +8,7 @@ CSP = "; ".join([
     "font-src 'self'",
     "connect-src 'self'",
     "worker-src 'self'",
+    "frame-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

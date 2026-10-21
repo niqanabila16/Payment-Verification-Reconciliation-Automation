@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ APP_NAME }}{% endblock %} | {{ APP_NAME }}</title>
   <meta name="color-scheme" content="light">
-  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=3">
-  <!-- <link rel="icon" href="{% static 'img/favicon.svg' %}" type="image/svg+xml"> -->
+  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=9">
+  <link rel="icon" href="{% static 'img/favicon.svg' %}" type="image/svg+xml">
 </head>
 {% with current=request.resolver_match.view_name %}
 <body data-user-id="{{ user.pk|default:'' }}" data-poll-url="{% url 'core:notification_poll' %}" data-sw-url="{% url 'core:service_worker' %}">
@@ -17,7 +17,13 @@
     <nav class="topnav" aria-label="Main">
       {% if user.role == "teller" %}
         <a href="{% url 'receipts:new' %}" {% if current == 'receipts:new' %}aria-current="page"{% endif %}>New receipt</a>
-        <a href="{% url 'receipts:list' %}" {% if current == 'receipts:list' or current == 'receipts:detail' or current == 'receipts:edit' %}aria-current="page"{% endif %}>Receipts</a>
+        <a href="{% url 'cards:dashboard' %}" {% if current == 'cards:dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+        <a href="{% url 'cards:teller_requests' %}" {% if current|slice:":6" == 'cards:' and current != 'cards:dashboard' %}aria-current="page"{% endif %}>Card activation</a>
+        <a class="topnav__end" href="{% url 'receipts:list' %}" {% if current == 'receipts:list' or current == 'receipts:detail' or current == 'receipts:edit' %}aria-current="page"{% endif %}>Log receipt</a>
+      {% elif user.role == "cs" %}
+        <a href="{% url 'cards:dashboard' %}" {% if current == 'cards:dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+        <a href="{% url 'cards:cs_cards' %}" {% if current == 'cards:cs_cards' %}aria-current="page"{% endif %}>Cards</a>
+        <a href="{% url 'cards:cs_requests' %}" {% if current == 'cards:cs_requests' %}aria-current="page"{% endif %}>Activation requests</a>
       {% elif user.role == "finance" %}
         <a href="{% url 'reconciliation:queue' %}" {% if current == 'reconciliation:queue' or current == 'reconciliation:detail' %}aria-current="page"{% endif %}>Reconciliation</a>
         <a href="{% url 'reconciliation:import_list' %}" {% if current == 'reconciliation:import_list' or current == 'reconciliation:import_detail' %}aria-current="page"{% endif %}>Upload history</a>
@@ -25,6 +31,8 @@
         <a href="{% url 'accounts:user_list' %}" {% if current|slice:":14" == 'accounts:user_' %}aria-current="page"{% endif %}>Users</a>
         <a href="{% url 'core:master_list' 'branches' %}" {% if current|slice:":12" == 'core:master_' %}aria-current="page"{% endif %}>Master data</a>
         <a href="{% url 'reconciliation:queue' %}" {% if current == 'reconciliation:queue' or current == 'reconciliation:detail' %}aria-current="page"{% endif %}>Reconciliation</a>
+        <a href="{% url 'cards:dashboard' %}" {% if current == 'cards:dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+        <a href="{% url 'cards:cs_cards' %}" {% if current|slice:":6" == 'cards:' and current != 'cards:dashboard' %}aria-current="page"{% endif %}>Cards</a>
         <a href="{% url 'accounts:audit_log' %}" {% if current == 'accounts:audit_log' %}aria-current="page"{% endif %}>Audit trail</a>
       {% endif %}
     </nav>
@@ -41,11 +49,12 @@
     </div>
   </header>
   <main class="content" id="main" tabindex="-1">
-    {% include "components/alerts.html" %}
+    <div data-flash>{% include "components/alerts.html" %}</div>
     {% block content %}{% endblock %}
   </main>
   {% include "components/confirm_dialog.html" %}
-  <script src="{% static 'js/app.js' %}?v=3" defer></script>
+  <script src="{% static 'js/app.js' %}?v=5" defer></script>
+  <script src="{% static 'js/live_region.js' %}?v=1" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 {% endwith %}

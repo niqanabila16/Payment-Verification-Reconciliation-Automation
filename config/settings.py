@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "apps.core",
     "apps.receipts",
     "apps.reconciliation",
+    "apps.cards",
 ]
 
 MIDDLEWARE = [
@@ -173,12 +174,21 @@ MAX_UPLOAD_MB = 5
 DATA_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_MB * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_MB * 1024 * 1024
 ALLOWED_STATEMENT_EXTENSIONS = (".csv", ".xlsx")
+ALLOWED_CARD_FILE_EXTENSIONS = (".csv", ".xlsx")     # Customer service: file with the card numbers
+CARD_BIN = "461699"                                  # every card number starts with this BIN (the Teller types the rest)
+CARD_OTHERS_INCOME_RM = 30                           # "Others Income" per card collected by a customer, in the Excel report
+# Uploaded customer PDFs (card activation) are kept here, outside the static folder; they are served only to signed-in users.
+MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_URL = "media/"
 
 # --------------------------------------------------------------------------
 # Business rules. Every number the matching engine uses lives here.
 # --------------------------------------------------------------------------
-MATCH_TYPO_MIN_SCORE = float(env("MATCH_TYPO_MIN_SCORE", "80"))   # RapidFuzz ratio, 0-100
-STATEMENT_BANK_CODE = "MANDIRI"                                   # every uploaded statement belongs to this bank
+NAME_WORD_MIN_SCORE = float(env("NAME_WORD_MIN_SCORE", "85"))      # RapidFuzz ratio of one name word (a small typo is allowed)
+NAME_MATCH_MIN_WORDS = int(env("NAME_MATCH_MIN_WORDS", "2"))      # how many name words must be shared (account holder vs bank name)
+# Which single mismatch sends a receipt to Review instead of Not found: any of "name", "amount", "reference". For now only "amount".
+REVIEW_REASONS = tuple(env_list("REVIEW_REASONS", "amount"))
+BANK_DATA_RETENTION_DAYS = int(env("BANK_DATA_RETENTION_DAYS", "31"))   # bank statement data is deleted after this many days
 OFFLINE_TIMESTAMP_MAX_AGE_DAYS = 31                               # offline receipts older than this use server time
 REFERENCE_MIN_LENGTH = int(env("REFERENCE_MIN_LENGTH", "6"))      # NFR-PERF-2 (frontend + backend)
 REFERENCE_MAX_LENGTH = int(env("REFERENCE_MAX_LENGTH", "20"))
@@ -186,11 +196,24 @@ STATEMENT_HEADER_ROW = 4                                          # BR-5: header
 IMPORT_RUN_SYNC = False   # False: process imports in a background thread (progress bar); tests set True
 
 # --------------------------------------------------------------------------
+# Password reset by e-mail (Forgot password). The emailed link is valid for this many seconds.
+# SITE_BASE_URL is the address users type in the browser; it is used to build the link inside the e-mail.
+# --------------------------------------------------------------------------
+PASSWORD_RESET_TIMEOUT = int(env("PASSWORD_RESET_MINUTES", "60")) * 60
+SITE_BASE_URL = env("SITE_BASE_URL").rstrip("/")
+
+# --------------------------------------------------------------------------
 # Notifications (BR-7). In-app + browser notifications always; e-mail digest optional.
 # --------------------------------------------------------------------------
 NOTIFY_BY_EMAIL = env_bool("NOTIFY_BY_EMAIL", False)
-EMAIL_BACKEND = env("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 EMAIL_HOST = env("EMAIL_HOST")
+# With no EMAIL_HOST the mail is only printed in the server window (development). As soon as EMAIL_HOST is filled in, real SMTP is used
+# automatically, so forgetting to change EMAIL_BACKEND can no longer make mail "disappear".
+_default_backend = "django.core.mail.backends.smtp.EmailBackend" if EMAIL_HOST else "django.core.mail.backends.console.EmailBackend"
+EMAIL_BACKEND = env("EMAIL_BACKEND", "") or _default_backend
+if EMAIL_HOST and EMAIL_BACKEND.endswith("console.EmailBackend"):
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_TIMEOUT = 15
 EMAIL_PORT = int(env("EMAIL_PORT", "587"))
 EMAIL_HOST_USER = env("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD")

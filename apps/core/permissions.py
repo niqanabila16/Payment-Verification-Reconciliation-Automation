@@ -23,3 +23,20 @@ def role_required(*roles: str):
         return wrapper
 
     return decorator
+
+
+def cs_permission_required(flag: int):
+    """Allow only Customer service accounts that hold the permission `flag` (see accounts.models.CsPerm)."""
+
+    def decorator(view):
+        @wraps(view)
+        def wrapper(request, *args, **kwargs):
+            if not request.user.is_authenticated:
+                return redirect_to_login(request.get_full_path())
+            if not request.user.can_cs(flag):
+                raise PermissionDenied
+            return view(request, *args, **kwargs)
+
+        return wrapper
+
+    return decorator

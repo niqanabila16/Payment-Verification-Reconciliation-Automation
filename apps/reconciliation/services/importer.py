@@ -1,5 +1,6 @@
 """
-Orchestrates a bank statement upload: validate -> store new rows -> run the matching engine.
+Orchestrates a bank statement upload: validate -> delete bank data older than 31 days -> store new rows -> run the matching engine
+for the receipts of THE UPLOADED BANK only.
 
 The slow part runs in a background thread so the browser can show a progress bar.
 The thread uses its own database connection and always closes it.
@@ -15,19 +16,13 @@ from django.conf import settings
 from django.db import close_old_connections, transaction
 
 from apps.core.audit import record
-from apps.core.models import Bank
 
 from ..models import ImportStatus, StatementEntry, StatementImport
 from .engine import run_matching
 from .parser import ParsedStatement, StatementParseError, parse_statement
+from .retention import purge_if_due
 
 logger = logging.getLogger(__name__)
-
-
-def statement_bank() -> Bank:
-    """Every statement comes from Mandiri (settings.STATEMENT_BANK_CODE)."""
-    bank, _ = Bank.objects.get_or_create(code=settings.STATEMENT_BANK_CODE, defaults={"name": "Bank Mandiri"})
-    return bank
 
 
 def find_previous_upload(file_name: str, digest: str = "") -> StatementImport | None:
@@ -45,11 +40,17 @@ def read_upload(uploaded_file) -> tuple[bytes, str]:
     return data, hashlib.sha256(data).hexdigest()
 
 
-def start_import(*, user, data: bytes, digest: str, file_name: str, fallback_account: str = "", fallback_date=None) -> StatementImport:
-    """Parse the file and start processing. Raises StatementParseError with a readable message."""
-    parsed = parse_statement(data, file_name, fallback_account, fallback_date)
+def start_import(*, user, bank, data: bytes, digest: str, file_name: str, fallback_account: str = "", fallback_date=None) -> StatementImport:
+    """
+    Parse the file with the reader of the selected bank and start processing.
+    Raises StatementParseError (or BankMismatchError) with a readable message.
+    """
+    if not bank.statement_format:
+        raise StatementParseError(f"{bank.name} has no statement reader. Set its statement format in Master data.")
+    parsed = parse_statement(data, file_name, bank.statement_format.lower(), fallback_account, fallback_date)
+    purge_if_due(interval_seconds=60)       # bank data older than 31 days goes first, so it cannot be matched against
     imp = StatementImport.objects.create(
-        bank=statement_bank(), account_number=parsed.account_number, account_label=parsed.account_label,
+        bank=bank, account_number=parsed.account_number, account_label=parsed.account_label,
         statement_date=parsed.statement_date, file_name=file_name[:255], file_sha256=digest,
         file_format=parsed.file_format, row_count=len(parsed.rows), status=ImportStatus.PROCESSING,
         uploaded_by=user, progress_percent=5)
@@ -80,29 +81,30 @@ def process_import(import_id: int, parsed: ParsedStatement, user_id: int) -> Non
 
     try:
         # 1. Store only rows that are new (same bank + account + Bank Ref No. = already known).
-        known = set(StatementEntry.objects.filter(
-            statement_import__bank=imp.bank, statement_import__account_number=imp.account_number,
-        ).values_list("bank_ref_no", flat=True))
+        known = set(StatementEntry.objects.filter(bank=imp.bank, statement_import__account_number=imp.account_number)
+                    .values_list("bank_ref_no", flat=True))
         fresh = [r for r in parsed.rows if r.bank_ref_no not in known]
         skipped_overlap = len(parsed.rows) - len(fresh)
         with transaction.atomic():
             StatementEntry.objects.bulk_create([
-                StatementEntry(statement_import=imp, description=r.description, bank_branch_code=r.bank_branch_code,
-                               debit_amount=r.debit, credit_amount=r.credit, counterparty_name=r.counterparty_name,
-                               reference_1=r.reference_1, reference_2=r.reference_2, bank_ref_no=r.bank_ref_no,
-                               reference_normalized=r.reference_normalized, source_row=r.source_row)
+                StatementEntry(statement_import=imp, bank=imp.bank, description=r.description,
+                               debit_amount=r.debit, credit_amount=r.credit, amount=r.amount, transaction_date=r.transaction_date,
+                               counterparty_name=r.counterparty_name, reference=r.reference, bank_ref_no=r.bank_ref_no,
+                               reference_normalized=r.reference_normalized, matchable=r.matchable, source_row=r.source_row)
                 for r in fresh])
         set_progress(40)
 
-        # 2. Run the matching engine; its progress covers 40% -> 95%.
-        summary = run_matching(actor=actor, progress=lambda done, total: set_progress(40 + int(55 * done / max(total, 1))))
+        # 2. Run the matching engine for the receipts of this bank; its progress covers 40% -> 95%.
+        summary = run_matching(actor=actor, bank=imp.bank, progress=lambda done, total: set_progress(40 + int(55 * done / max(total, 1))))
 
         imp.status = ImportStatus.PROCESSED
         imp.progress_percent = 100
         imp.result_summary = {
+            "bank": imp.bank.name,
             "rows_added": len(fresh),
             "rows_skipped_overlap": skipped_overlap,
             "rows_skipped_duplicate_in_file": parsed.duplicates_in_file,
+            "rows_open_item_only": sum(1 for r in fresh if not r.matchable),
             "rows_skipped_invalid": parsed.skipped[:20],
             "invalid_count": len(parsed.skipped),
             **summary.as_dict(),

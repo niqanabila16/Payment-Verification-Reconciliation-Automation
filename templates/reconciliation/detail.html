@@ -4,10 +4,12 @@
 <div class="page-head">
   <div><p class="xs mb-0"><a href="{% url 'reconciliation:queue' %}">Reconciliation</a> / #{{ match.pk }}</p>
     <h1><span class="ref">{{ sub.bank_reference_no }}</span> - {{ sub.amount|money }}</h1></div>
-  <div class="page-head__actions">{% status_badge match.match_status %}</div>
+  <div class="page-head__actions">{% match_badge match %}</div>
 </div>
 
-{% if match.notes %}<div class="alert alert--{% if match.match_status == 'gfp' %}success{% elif match.match_status == 'not_found' %}danger{% else %}warning{% endif %}" role="status">{% icon "info" %}<div><p class="mb-0">{{ match.notes }}</p></div><span></span></div>{% endif %}
+{% if match.match_status == "rejected" %}
+<div class="alert alert--danger" role="status">{% icon "x-circle" %}<div><span class="alert__title">Rejected - waiting for the teller</span><p class="mb-0">{{ match.finance_note }}</p></div><span></span></div>
+{% elif match.notes %}<div class="alert alert--{% if match.match_status == 'gfp' %}success{% elif match.match_status == 'not_found' %}danger{% else %}warning{% endif %}" role="status">{% icon "info" %}<div><p class="mb-0">{{ match.notes }}</p></div><span></span></div>{% endif %}
 
 {% if rows %}
 <section class="card mb-1" aria-labelledby="cmp-title">
@@ -20,9 +22,11 @@
       <tr class="is-{{ r.state }}">
         <th scope="row">{{ r.label }}</th>
         {% if r.kind == "reference" %}
-          {% ref_diff r.teller r.bank as d %}
+          {% if r.state == "info" %}<td><span class="big">{{ r.teller }}</span><span class="compare__hint">As typed: {{ r.teller_raw }}</span></td>
+          <td><span class="big">{{ r.bank }}</span><span class="compare__hint">In bank file: {{ r.bank_raw }}</span>
+          {% else %}{% ref_diff r.teller r.bank as d %}
           <td><span class="big">{{ d.left }}</span><span class="compare__hint">As typed: {{ r.teller_raw }}</span></td>
-          <td><span class="big">{{ d.right }}</span><span class="compare__hint">In bank file: {{ r.bank_raw }}</span>
+          <td><span class="big">{{ d.right }}</span><span class="compare__hint">In bank file: {{ r.bank_raw }}</span>{% endif %}
         {% elif r.kind == "amount" %}
           <td class="big">{{ r.teller|money }}</td><td><span class="big">{{ r.bank|money }}</span>
         {% else %}
@@ -35,43 +39,57 @@
       </tr>
     {% endfor %}
     </tbody></table></div>
+  <p class="compare__source">{{ entry_kind }}: only the extracted columns (name, amount, reference, description, date) are compared.</p>
+</section>
+{% elif closest %}
+<section class="card mb-1" aria-labelledby="near-title">
+  <div class="card__head"><h2 id="near-title">Nearest unmatched bank rows</h2><span class="muted small">Not matches: shown only so you can see what is close.</span></div>
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th>Reference</th><th>Name</th><th class="num">Amount</th><th>Differs</th></tr></thead><tbody>
+    {% for c in closest %}
+      <tr><td><span class="ref">{{ c.entry.display_reference|default:"-" }}</span><span class="sub">row {{ c.entry.source_row }} - {{ c.entry.statement_import.file_name }}</span></td>
+        <td>{{ c.entry.counterparty_name|default:"-" }}</td><td class="num">{{ c.entry.amount|money }}</td>
+        <td>{% for f in c.failed %}<span class="badge badge--danger">{{ f }}</span> {% empty %}-{% endfor %}</td></tr>
+    {% endfor %}</tbody></table></div>
 </section>
 {% endif %}
 
-<div class="split">
+<div class="split split--wide">
   <section class="card"><div class="card__head"><h2>Receipt</h2></div><div class="card__body"><dl class="meta">
     <dt>Branch</dt><dd>{{ sub.branch.code }}</dd><dt>Reported by</dt><dd>{{ sub.submitted_by.name|default:"-" }}</dd>
-    <dt>Entered</dt><dd>{{ sub.entered_at|date:"d M Y H:i" }}</dd>
-    <dt>Sender</dt><dd>{{ sub.sender_name }}</dd><dt>Account holder</dt><dd>{{ sub.account_holder_name }}</dd>
+    <dt>Transaction</dt><dd>{{ sub.transaction_at|date:"d M Y H:i" }}</dd><dt>Entered</dt><dd>{{ sub.entered_at|date:"d M Y H:i" }}</dd>
+    <dt>Account holder</dt><dd>{{ sub.account_holder_name }}</dd><dt>Sender</dt><dd>{{ sub.sender_name|default:"Unknown" }}</dd>
     <dt>Relationship</dt><dd>{{ sub.relationship|relationship_label }}</dd><dt>Method</dt><dd>{{ sub.payment_method_code|payment_method_label }}</dd>
     <dt>Bank</dt><dd>{{ sub.bank.name }}</dd>
     {% if match.matched_by %}<dt>Decided by</dt><dd>{{ match.matched_by.name }}</dd>{% endif %}
+    {% if match.finance_note %}<dt>Note</dt><dd>{{ match.finance_note }}</dd>{% endif %}
   </dl></div></section>
 
   {% if can_act and match.is_open %}
-  <section class="card"><div class="card__head"><h2>Actions</h2></div><div class="card__body">
-    {% if match.suggested_bank_statement_entry_id %}
-    <div class="action-block"><h3>Approve</h3>
-      <form method="post" action="{% url 'reconciliation:confirm' match.pk %}" novalidate>{% csrf_token %}
-        <div class="field"><label class="field__label" for="confirm-note">Note{% if has_diff %}<span class="field__req" aria-hidden="true">*</span>{% endif %}</label><textarea class="input input--textarea" id="confirm-note" name="note" rows="2" maxlength="500" {% if has_diff %}required{% endif %}></textarea></div>
-        <button class="btn btn--primary" type="submit" data-confirm-title="Approve and verify?" data-confirm-message="The receipt becomes verified (GFP) and the teller is notified." data-confirm-label="Approve">{% icon "check-circle" %} Approve (GFP)</button>
-      </form></div>
-    <div class="action-block"><h3>Reject suggestion</h3>
-      <form method="post" action="{% url 'reconciliation:reject' match.pk %}" novalidate>{% csrf_token %}
-        <div class="field"><label class="field__label" for="rej-note">Reason<span class="field__req" aria-hidden="true">*</span></label><input class="input" id="rej-note" name="note" required maxlength="500"></div>
-        <button class="btn" type="submit" data-confirm-title="Reject the suggestion?" data-confirm-message="The receipt goes back to Not found." data-confirm-label="Reject">{% icon "x-circle" %} Reject</button>
-      </form></div>
-    {% endif %}
-    <div class="action-block"><h3>Ask the teller to correct it</h3>
-      <form method="post" action="{% url 'reconciliation:feedback' match.pk %}" novalidate>{% csrf_token %}
-        <div class="field"><label class="field__label" for="fb-msg">Message<span class="field__req" aria-hidden="true">*</span></label><textarea class="input input--textarea" id="fb-msg" name="message" rows="2" required maxlength="500" placeholder="e.g. Reference ends with 45, not 54"></textarea></div>
-        <button class="btn" type="submit">{% icon "message" %} Send to teller</button>
-      </form></div>
-    <div class="action-block"><h3>Move to another branch</h3>
-      <form method="post" action="{% url 'reconciliation:reassign' match.pk %}" class="flex">{% csrf_token %}
-        <label class="visually-hidden" for="reassign-branch">Branch</label>{{ reassign_form.branch }}
-        <button class="btn btn--sm" type="submit">Move</button></form></div>
+  <div class="stack">
+  <section class="card decision" aria-labelledby="decision-title"><div class="card__head"><h2 id="decision-title">Decision</h2></div><div class="card__body">
+    {% if can_gfp or can_reject %}
+    <form method="post" id="decision-form" novalidate>{% csrf_token %}
+      <div class="decision__row">
+      <div class="field"><label class="field__label" for="decision-note">Note{% if amount_differs %}<span class="field__req" aria-hidden="true">*</span>{% endif %}</label>
+        <textarea class="input input--textarea" id="decision-note" name="note" rows="3" maxlength="200"></textarea></div>
+      {% if can_reject %}
+      <div class="field"><label class="field__label" for="reject-reason">Reject reason<span class="field__req" aria-hidden="true">*</span></label>
+        <select class="input" id="reject-reason" name="reject_reason">
+          <option value="">Choose a reason</option>{% for r in reject_reasons %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+        </select></div>
+      {% endif %}
+      <div class="decision__buttons">
+        {% if can_gfp %}<button class="btn btn--primary" type="submit" formaction="{% url 'reconciliation:confirm' match.pk %}" {% if amount_differs %}data-needs-note="decision-note"{% endif %}
+          data-confirm-title="Approve as GFP?" data-confirm-message="The receipt becomes verified (GFP) and the teller is notified." data-confirm-label="GFP">{% icon "check-circle" %} GFP</button>{% endif %}
+        {% if can_reject %}<button class="btn btn--danger" type="submit" formaction="{% url 'reconciliation:reject' match.pk %}" data-needs-select="reject-reason"
+          data-confirm-title="Reject this receipt?" data-confirm-message="The teller sees status Reject with your note and has to correct the receipt." data-confirm-label="Reject" data-confirm-tone="danger">{% icon "x-circle" %} Reject</button>{% endif %}
+      </div>
+      </div>
+    </form>
+    {% else %}<p class="muted mb-0">Nothing to decide yet. The receipt is checked again on the next bank statement upload.</p>{% endif %}
   </div></section>
+  </div>
   {% elif not can_act %}
   <div class="alert alert--info" role="status">{% icon "info" %}<div><p class="mb-0">Read-only for administrators.</p></div><span></span></div>
   {% endif %}

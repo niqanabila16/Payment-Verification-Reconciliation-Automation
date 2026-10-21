@@ -36,6 +36,10 @@ def notify_role(role: str, type: str, message: str, entity_type: str = "", entit
     return notify_users(User.objects.filter(role=role, is_active=True), type, message, entity_type, entity_id)
 
 
+def _role(notification: Notification) -> str:
+    return notification.recipient.role if notification.recipient_id else notification.recipient_role
+
+
 def notification_url(notification: Notification) -> str:
     """Where clicking a notification should lead."""
     kind, pk = notification.related_entity_type, notification.related_entity_id
@@ -44,10 +48,12 @@ def notification_url(notification: Notification) -> str:
             return reverse("reconciliation:detail", args=[pk])
         if kind == "submission" and pk:
             return reverse("receipts:detail", args=[pk])
+        if kind == "cards":
+            return reverse("cards:teller_cards") if _role(notification) == "teller" else reverse("cards:cs_cards")
+        if kind == "activation":
+            return reverse("cards:teller_requests") if _role(notification) == "teller" else reverse("cards:cs_requests")
         if kind == "import" and pk:
             return reverse("reconciliation:import_detail", args=[pk])
-        if kind == "password_request":
-            return reverse("accounts:user_list")
     except Exception:  # pragma: no cover - a dangling reference must never break the page
         logger.exception("Could not build notification URL")
     return reverse("core:notifications")

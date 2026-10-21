@@ -6,8 +6,9 @@
 <form method="post" class="card form-card" novalidate>
   {% csrf_token %}
   <div class="card__body"><div class="field-grid">
-    {% include "components/field.html" with field=form.code %}
+    {% if form.code %}{% include "components/field.html" with field=form.code %}{% endif %}
     {% include "components/field.html" with field=form.name %}
+    {% if form.statement_format %}{% include "components/field.html" with field=form.statement_format %}{% endif %}{% if form.bank %}{% include "components/field.html" with field=form.bank %}{% endif %}
   </div></div>
   <div class="card__foot"><a class="btn" href="{% url 'core:master_list' kind %}">Cancel</a><button class="btn btn--primary" type="submit">Save changes</button></div>
 </form>

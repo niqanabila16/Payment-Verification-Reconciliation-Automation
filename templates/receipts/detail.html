@@ -3,17 +3,21 @@
 {% block content %}
 <div class="page-head"><h1>Receipt #{{ sub.pk }}</h1>
   <div class="page-head__actions">{% teller_badge match.match_status %}{% if can_edit %}<a class="btn" href="{% url 'receipts:edit' sub.pk %}">{% icon "edit" %} Correct receipt</a>{% endif %}</div></div>
+{% if match.match_status == "rejected" %}
+<div class="alert alert--danger" role="status">{% icon "x-circle" %}<div><span class="alert__title">Rejected by Finance</span><p class="mb-0">{{ match.finance_note }}</p><p class="mb-0 xs">Correct the receipt: its status returns to Pending and it is checked again.</p></div><span></span></div>
+{% endif %}
 <section class="card form-card"><div class="card__body">
   <dl class="meta">
     <dt>Branch</dt><dd>{{ sub.branch.code }}</dd>
     <dt>Reported by</dt><dd>{{ sub.submitted_by.name|default:"-" }}</dd>
-    <dt>Sender</dt><dd>{{ sub.sender_name }}</dd>
     <dt>Account holder</dt><dd>{{ sub.account_holder_name }}</dd>
+    <dt>Sender</dt><dd>{{ sub.sender_name|default:"Unknown" }}</dd>
     <dt>Relationship</dt><dd>{{ sub.relationship|relationship_label }}</dd>
     <dt>Bank</dt><dd>{{ sub.bank.name }}</dd>
     <dt>Payment method</dt><dd>{{ sub.payment_method_code|payment_method_label }}</dd>
     <dt>Reference</dt><dd class="ref">{{ sub.bank_reference_no }}</dd>
     <dt>Amount</dt><dd>{{ sub.amount|money }}</dd>
+    <dt>Transaction</dt><dd>{{ sub.transaction_at|date:"d M Y H:i" }}</dd>
     <dt>Entered</dt><dd>{{ sub.entered_at|date:"d M Y H:i" }}</dd>
   </dl></div></section>
 {% endblock %}

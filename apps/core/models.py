@@ -9,6 +9,9 @@ class Bank(models.Model):
 
     code = models.CharField(max_length=20, unique=True, help_text="e.g. RHB, MANDIRI")
     name = models.CharField(max_length=100)
+    statement_format = models.CharField(
+        max_length=10, blank=True, choices=[("", "No statement reader"), ("rhb", "RHB"), ("alb", "ALB"), ("pbb", "PBB"), ("mbb", "MBB")],
+        help_text="Which bank statement reader is used when Finance uploads a file for this bank.")
     is_active = models.BooleanField(default=True, help_text="Inactive banks are hidden from dropdowns; history is kept.")
     created_at = models.DateTimeField(default=timezone.now)
 
@@ -44,6 +47,36 @@ class Relationship(models.Model):
 
     class Meta:
         ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class TransactionDescription(models.Model):
+    """
+    Value list for the Finance filter "Transaction description" (e.g. ALB "DuitNow CR Trf CA", "CDM CA CSH DEP-W/O C").
+    Managed by Admin (Master data) so the options can be customised without a code change. `name` is the text exactly as
+    the bank prints it in the Description column; `bank` optionally limits the option to one bank's statements.
+    """
+
+    code = models.CharField(max_length=120, unique=True, editable=False, help_text="Derived from the name (letters and digits only).")
+    name = models.CharField(max_length=100, help_text="Description exactly as the bank statement prints it.")
+    bank = models.ForeignKey(Bank, null=True, blank=True, on_delete=models.CASCADE, related_name="descriptions",
+                             help_text="Leave empty to offer this option for every bank.")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["name"]
+
+    @staticmethod
+    def make_code(name: str) -> str:
+        return "".join(ch for ch in (name or "").upper() if ch.isalnum())[:120]
+
+    def save(self, *args, **kwargs):
+        self.name = " ".join((self.name or "").split())
+        self.code = self.make_code(self.name)
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return self.name

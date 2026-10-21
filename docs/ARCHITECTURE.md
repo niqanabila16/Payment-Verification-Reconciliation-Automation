@@ -1,8 +1,8 @@
 # Software Architecture
 
-The picture below is the same diagram that the site shows under **Architecture** (`static/img/architecture.svg`).
+The diagram is kept as an image in the project root (`architecture-diagram.png` and `.svg`). It is not part of the website.
 
-![Architecture](../static/img/architecture.svg)
+![Architecture](../architecture-diagram.png)
 
 ```mermaid
 flowchart LR
@@ -19,7 +19,7 @@ flowchart LR
   end
   BE <--> DB[(SQLite / PostgreSQL)]
   BE <--> CACHE[(Local memory cache)]
-  BE -.optional.-> SMTP[SMTP e-mail digest]
+  BE -.optional.-> SMTP[SMTP: password reset link and e-mail digest]
   BANK[Bank website] -. manual CSV/XLSX download .-> F
 ```
 
@@ -28,20 +28,18 @@ flowchart LR
 1. **Teller reports a payment.** `receipts.js` validates length rules in the browser, posts the form as JSON.
    If the server is unreachable the receipt is stored in `localStorage` with a client-generated UUID and re-sent later.
    `create_submission()` is idempotent on that UUID, takes the branch from the session and creates a *pending* match row (BR-6).
-2. **Finance uploads a statement.** `start_import()` checks size, SHA-256 (BR-1), parses rows (header on row 4, rows 1 and 3 ignored)
+2. **Finance uploads a statement.** `start_import()` checks size, SHA-256 (BR-1), parses rows with the reader of the selected bank (RHB: header on row 4, rows 1 and 3 ignored; ALB/PBB/MBB: header row found automatically; a wrong bank choice raises `BankMismatchError`)
    and starts a background thread. The thread stores new rows, calls `run_matching()` and reports progress to the progress bar.
-3. **Matching engine.** For each open receipt, only credit rows of the same bank are considered (company branch is never a filter):
+3. **Matching engine.** For each open receipt, the rows of **the same bank** are considered (the company branch is never a filter). The amount of a bank row is its Credit or Debit value, whichever is filled. Where the bank prints a sender name (RHB) a lenient name check (partial or re-ordered names are fine) is shown beside the match; amount + reference decide:
 
    | Condition | Result |
    |---|---|
-   | Reference equal/contained after normalisation **and** amount equal to the sen | `gfp` (score 100) |
-   | Reference matches but amount differs | `manual_review` (BR-8), only a *suggestion* |
-   | Amount equal and RapidFuzz similarity of references >= `MATCH_TYPO_MIN_SCORE` | `typo`, only a *suggestion* |
-   | Otherwise | `not_found`, retried on every new statement until `RECHECK_WINDOW_DAYS` (BR-10) |
+   | Name (account holder vs bank name, at least 2 shared words, any order) **and** amount equal to the sen | `gfp` (score 100). The reference is NOT compared (kept for the report and the duplicate check). MBB, which prints no name, still uses amount + reference |
+   | Name matches but the amount differs (closest amount) | `manual_review` ("Review", reasons in `review_reasons`, now only `amount`), only a *suggestion* |
+   | Otherwise | `not_found`, retried on every new statement, however old the receipt is (BR-10) |
 
-4. **Finance reviews.** Approve (final link), send feedback (comment + notification, Teller corrects, receipt re-matches),
-   reject suggestion, link manually, close with mandatory reason, or move the receipt to another branch.
-5. **Notifications.** Stored in the database, shown by the bell, raised as browser notifications by polling, optionally e-mailed as a digest.
+4. **Finance reviews.** **GFP** (blue, final link) or **Reject** (red) in the Actions column with one optional Note, send a correction request (one-way notification), or move the receipt to another branch. A bank row nobody claimed is listed under **Open Item**. The queue shows the most recently changed items first. Finance can download the weekly/monthly Excel report (Open Item and GFP). Tellers see only Pending or Verified.
+5. **Notifications.** Stored in the database, shown by the bell, raised as browser notifications by polling, optionally e-mailed as a digest. Opening the notification list marks everything as read. Tellers are notified only when a receipt is Verified.
 
 ## Decisions (ADR summary)
 
@@ -51,10 +49,12 @@ flowchart LR
 | 2 | SQLite default, PostgreSQL supported | Zero setup for the central PC; schema stays portable | More than ~20 concurrent users or multiple servers |
 | 3 | Deterministic rules + RapidFuzz, no ML | Finance must be able to explain every result; zero tolerance on amounts | Real data shows systematic misses |
 | 4 | Background thread for imports | Progress bar without extra infrastructure | Imports > a few minutes: Redis + RQ |
-| 5 | Suggestions are separate from final links | A typo is never final without a human (DBML v3) | - |
+| 5 | Suggestions are separate from final links | A Review suggestion is never final without a human (DBML v3) | - |
 | 6 | Service worker + localStorage queue | Central PC is off at night (constraint) | Branches need guaranteed delivery: add Web Push + server-side queue |
 | 7 | Strict CSP, no inline JS/CSS | Defence in depth for a finance tool | - |
 | 8 | No Django admin site | It would offer a password-change path that BR forbids | - |
+| 9 | Dropdown values live in tables (Master data), receipts store only the code | Admin adds values without a developer; renaming never breaks history | - |
+| 10 | No sidebar, header navigation | Less chrome, works on small screens | - |
 
 ## Where would automation plug in?
 
@@ -75,7 +75,7 @@ Recommended first step: ask the bank whether a scheduled file delivery exists. I
 
 * Roles enforced server-side on every view (`role_required`); tested in `AccessControlTests.test_role_matrix`.
 * CSRF on all POSTs, `HttpOnly` + `SameSite=Lax` cookies, secure cookies when `DJANGO_DEBUG=False`.
-* Sign-in lockout (5 failures / 15 min), generic error for unknown e-mail or wrong password.
+* No lockout of any kind (requirement). Generic error for unknown e-mail or wrong password. "Forgot password" e-mails a unique, expiring, single-use link (Django token generator) and gives the same answer whether or not the address exists.
 * Temporary passwords are shown once on a `no-store` page, never put in messages or cookies.
 * Append-only audit log (updates and deletes raise errors); admins can read, not change.
 * Uploaded files are parsed in memory and never stored or executed; only the hash and the parsed rows are kept.

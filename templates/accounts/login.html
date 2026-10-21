@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sign in | Payment Reconciliation</title>
   
-  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=3">
-  <!-- <link rel="icon" href="{% static 'img/favicon.svg' %}" type="image/svg+xml"> -->
+  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=4">
+  <link rel="icon" href="{% static 'img/favicon.svg' %}" type="image/svg+xml">
 </head>
 <body>
   {% include "components/icons.html" %}
@@ -16,7 +16,6 @@
       <form method="post" novalidate>
         {% csrf_token %}
         <h1>Sign in</h1>
-        <p class="muted">Use the email address and password given to you by an administrator.</p>
         
         {% include "components/alerts.html" %}
         
@@ -43,6 +42,6 @@
     </main>
   </div>
   
-  <script src="{% static 'js/app.js' %}?v=3" defer></script>
+  <script src="{% static 'js/app.js' %}?v=4" defer></script>
 </body>
 </html>

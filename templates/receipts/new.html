@@ -34,5 +34,6 @@
   </aside>
 </div>
 {% endif %}
+{% include "receipts/_duplicate_dialog.html" %}
 {% endblock %}
-{% block scripts %}{% load static %}<script src="{% static 'js/receipts.js' %}?v=3" defer></script>{% endblock %}
+{% block scripts %}{% load static %}<script src="{% static 'js/input_rules.js' %}?v=3" defer></script><script src="{% static 'js/receipts.js' %}?v=10" defer></script>{% endblock %}

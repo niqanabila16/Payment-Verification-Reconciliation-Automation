@@ -1,0 +1,4 @@
+<nav class="tabs mb-1" aria-label="Card activation">
+  <a href="{% url 'cards:teller_requests' %}" {% if active == "requests" %}aria-current="page"{% endif %}>Activation requests</a>
+  <a href="{% url 'cards:teller_cards' %}" {% if active == "cards" %}aria-current="page"{% endif %}>Cards received</a>
+</nav>

@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% load ui %}
 {% block title %}Upload result{% endblock %}
 {% block content %}
-<div class="page-head"><div><p class="xs mb-0"><a href="{% url 'reconciliation:import_list' %}">Upload history</a> / {{ imp.file_name }}</p><h1>{{ imp.file_name }}</h1></div></div>
+<div class="page-head"><div><p class="xs mb-0"><a href="{% url 'reconciliation:import_list' %}">Upload history</a> / {{ imp.file_name }}</p><h1>{{ imp.file_name }}</h1><p class="muted mb-0">{{ imp.bank.name }}</p></div></div>
 
 {% if imp.status == "processing" %}
 <section class="card" data-import-progress data-status-url="{% url 'reconciliation:import_status' imp.pk %}"><div class="card__body" aria-live="polite">
@@ -15,6 +15,7 @@
 {% else %}
 <div class="stat-row mb-1">
   <div class="stat"><span>{% icon "layers" %} New rows added</span><strong>{{ summary.rows_added }}</strong></div>
+  <div class="stat"><span>{% icon "list" %} Open item only</span><strong>{{ summary.rows_open_item_only|default:0 }}</strong></div>
   <div class="stat stat--success"><span>{% icon "check-circle" %} Match (GFP)</span><strong>{{ summary.gfp }}</strong></div>
   <div class="stat stat--review"><span>{% icon "search" %} Review</span><strong>{{ review_count }}</strong></div>
   <div class="stat stat--danger"><span>{% icon "x-circle" %} Not found</span><strong>{{ summary.not_found }}</strong></div>
@@ -26,7 +27,7 @@
   {% for reason in summary.rows_skipped_invalid %}<li>{{ reason }}</li>{% endfor %}
 </ul></div><span></span></div>
 {% endif %}
-<a class="btn btn--primary" href="{% url 'reconciliation:queue' %}">Open reconciliation {% icon "arrow-right" %}</a>
+<a class="btn btn--primary" href="{% url 'reconciliation:queue' %}?tab=open_item">Open reconciliation {% icon "arrow-right" %}</a>
 {% endif %}
 {% endblock %}
-{% block scripts %}{% load static %}<script src="{% static 'js/import_progress.js' %}?v=3" defer></script>{% endblock %}
+{% block scripts %}{% load static %}<script src="{% static 'js/import_progress.js' %}?v=4" defer></script>{% endblock %}

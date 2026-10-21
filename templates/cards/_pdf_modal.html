@@ -1,0 +1,12 @@
+{% load ui %}
+{# PDF preview: opened by [data-pdf-url] buttons; <-/-> (or the arrow buttons) step through the files in the table. #}
+<dialog class="pdf-modal" id="pdf-modal" aria-labelledby="pdf-title">
+  <div class="pdf-modal__bar">
+    <button class="btn btn--sm" type="button" data-pdf-prev aria-label="Previous file">&larr;</button>
+    <strong id="pdf-title" data-pdf-title>PDF</strong>
+    <span class="pdf-modal__pos" data-pdf-pos></span>
+    <button class="btn btn--sm" type="button" data-pdf-next aria-label="Next file">&rarr;</button>
+    <button class="btn btn--sm" type="button" data-pdf-close aria-label="Close preview">{% icon "x" %} Close</button>
+  </div>
+  <iframe class="pdf-modal__frame" title="PDF preview" data-pdf-frame></iframe>
+</dialog>

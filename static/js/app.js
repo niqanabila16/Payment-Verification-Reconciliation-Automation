@@ -45,6 +45,76 @@
     if (yes && form) form.requestSubmit(button);
   });
 
+  /* ---- Dialog open / close buttons ------------------------------------------- */
+  document.addEventListener('click', (event) => {
+    const open = event.target.closest('[data-open-dialog]');
+    if (open) document.getElementById(open.dataset.openDialog).showModal();
+    const close = event.target.closest('[data-close-dialog]');
+    if (close) close.closest('dialog').close();
+  });
+  document.addEventListener('submit', (event) => {          // a download form (report) leaves the page open: close its dialog
+    if (event.target.matches('[data-close-dialog-on-submit]')) setTimeout(() => event.target.closest('dialog').close(), 150);
+  });
+
+  /* ---- Row actions that need a note (Reject, GFP on an amount difference) ------ */
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-needs-note]');
+    if (!button) return;
+    const input = document.getElementById(button.dataset.needsNote);
+    if (input && !input.value.trim()) {
+      event.preventDefault();
+      event.stopPropagation();                               // do not open the confirmation yet
+      input.setCustomValidity('Write a note first.');
+      input.reportValidity();
+      input.addEventListener('input', () => input.setCustomValidity(''), { once: true });
+    }
+  }, true);
+
+  /* ---- Row actions that need a dropdown choice (Finance Reject reason) ------ */
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-needs-select]');
+    if (!button) return;
+    const select = document.getElementById(button.dataset.needsSelect);
+    if (select && !select.value) {
+      event.preventDefault();
+      event.stopPropagation();
+      select.setCustomValidity('Choose a reason first.');
+      select.reportValidity();
+      select.addEventListener('change', () => select.setCustomValidity(''), { once: true });
+    }
+  }, true);
+
+  /* ---- Live search: the list updates while typing, there is no search button ---- */
+  $$('form[data-live-search]').forEach((form) => {
+    const target = $('[data-live-results]');
+    let timer = null;
+    let controller = null;
+    const run = async () => {
+      const params = new URLSearchParams(new FormData(form));
+      Array.from(params.keys()).forEach((name) => { if (!params.get(name)) params.delete(name); });
+      const url = `${form.getAttribute('action') || window.location.pathname}${params.toString() ? '?' + params : ''}`;
+      if (controller) controller.abort();
+      controller = new AbortController();
+      target.classList.add('is-live-loading');
+      try {
+        const response = await fetch(url, { headers: { 'X-Live-Search': '1' }, credentials: 'same-origin', signal: controller.signal });
+        if (!response.ok) throw new Error('bad response');
+        target.innerHTML = await response.text();
+        window.history.replaceState(null, '', url);
+      } catch (error) {
+        if (error.name !== 'AbortError') form.submit();     // fall back to a normal page load
+        return;
+      } finally {
+        target.classList.remove('is-live-loading');
+      }
+    };
+    form.addEventListener('input', (event) => {
+      clearTimeout(timer);
+      timer = setTimeout(run, event.target.type === 'search' ? 250 : 0);
+    });
+    form.addEventListener('submit', (event) => { event.preventDefault(); clearTimeout(timer); run(); });
+  });
+
   /* ---- Copy to clipboard ------------------------------------------------- */
   document.addEventListener('click', async (event) => {
     const button = event.target.closest('[data-copy-target]');
@@ -100,6 +170,8 @@
       const needsBranch = role.value === 'teller';
       branch.disabled = !needsBranch;
       if (!needsBranch) branch.value = '';
+      const rights = $('[data-cs-rights]', roleForm);
+      if (rights) rights.hidden = role.value !== 'cs';
     };
     role.addEventListener('change', sync);
     sync();

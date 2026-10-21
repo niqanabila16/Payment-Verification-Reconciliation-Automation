@@ -1,0 +1,1 @@
+{% load ui %}{% if tone == "success" %}<span class="badge badge--success">{% icon "check-circle" %} {{ label }}</span>{% elif tone == "danger" %}<span class="badge badge--danger">{% icon "x-circle" %} {{ label }}</span>{% elif tone == "info" %}<span class="badge badge--info">{{ label }}</span>{% else %}<span class="badge badge--neutral">{{ label }}</span>{% endif %}

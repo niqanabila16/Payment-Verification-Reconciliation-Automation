@@ -15,6 +15,7 @@ class StyledFormMixin:
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
+            field.help_text = ""          # the screens carry no explanatory text under the fields
             widget = field.widget
             css = widget.attrs.get("class", "")
             if isinstance(widget, forms.CheckboxInput):

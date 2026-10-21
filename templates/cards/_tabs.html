@@ -1,0 +1,3 @@
+<nav class="tabs" aria-label="Card status">
+  {% for key, label, count in tabs %}<a href="?tab={{ key }}" {% if key == tab %}aria-current="page"{% endif %}>{{ label }} <span class="count">{{ count }}</span></a>{% endfor %}
+</nav>

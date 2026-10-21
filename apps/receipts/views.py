@@ -4,7 +4,9 @@ from datetime import timedelta
 from django.conf import settings
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import Q
+import json
+
+from django.db.models import Case, IntegerField, Q, Value, When
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -17,8 +19,14 @@ from apps.reconciliation.services import review
 from apps.reconciliation.services.engine import run_matching
 from apps.reconciliation.services.submissions import create_submission
 
-from .forms import ReceiptForm
+from .forms import ReceiptForm, duplicate_info
 from .models import TellerSubmission
+
+
+def _rejected_first(qs):
+    """Rejected receipts are always at the top of the Teller's lists; the rest keeps the newest-first order."""
+    return qs.annotate(_rank=Case(When(match__match_status=MatchStatus.REJECTED, then=Value(0)), default=Value(1), output_field=IntegerField())
+                       ).order_by("_rank", "-entered_at")
 
 
 def _wants_json(request) -> bool:
@@ -55,9 +63,11 @@ def new_receipt(request):
             return redirect("receipts:new")
         if _wants_json(request):
             html = render_to_string("receipts/_form.html", {"form": form, "branch": branch}, request=request)
+            if form.duplicate:   # already entered (maybe by another branch): the browser shows a red pop-up
+                return JsonResponse({"ok": False, "duplicate": form.popup, "html": html}, status=409)
             return JsonResponse({"ok": False, "html": html}, status=400)
 
-    recent = TellerSubmission.objects.filter(branch=branch).select_related("match", "bank")[:8] if branch else []
+    recent = _rejected_first(TellerSubmission.objects.filter(branch=branch).select_related("match", "bank"))[:8] if branch else []
     return render(request, "receipts/new.html", {"form": form, "branch": branch, "recent": recent})
 
 
@@ -70,12 +80,18 @@ def receipt_list(request):
     q = request.GET.get("q", "").strip()
     if status == MatchStatus.GFP:
         qs = qs.filter(match__match_status=MatchStatus.GFP)
-    elif status == MatchStatus.PENDING:   # for a teller, "pending" is everything that is not verified yet
-        qs = qs.exclude(match__match_status=MatchStatus.GFP)
+    elif status == MatchStatus.REJECTED:
+        qs = qs.filter(match__match_status=MatchStatus.REJECTED)
+    elif status == MatchStatus.PENDING:   # for a teller, "pending" is everything that is neither verified nor rejected
+        qs = qs.exclude(match__match_status__in=[MatchStatus.GFP, MatchStatus.REJECTED])
     if q:
         qs = qs.filter(Q(bank_reference_no__icontains=q) | Q(sender_name__icontains=q) | Q(account_holder_name__icontains=q))
-    page = Paginator(qs, 20).get_page(request.GET.get("page"))
-    return render(request, "receipts/list.html", {"page": page, "status": status, "q": q, "statuses": [(MatchStatus.PENDING, "Pending"), (MatchStatus.GFP, "Verified")]})
+    page = Paginator(_rejected_first(qs), 25).get_page(request.GET.get("page"))
+    context = {"page": page, "status": status, "q": q,
+               "statuses": [(MatchStatus.REJECTED, "Reject"), (MatchStatus.PENDING, "Pending"), (MatchStatus.GFP, "Verified")]}
+    if request.headers.get("X-Live-Search"):   # live search: only the part that changes
+        return render(request, "receipts/_list_results.html", context)
+    return render(request, "receipts/list.html", context)
 
 
 @role_required(Role.TELLER)
@@ -94,9 +110,10 @@ def receipt_edit(request, pk: int):
         messages.error(request, "This receipt is verified and can no longer be edited.")
         return redirect("receipts:detail", pk=pk)
     initial = {"client_uuid": sub.client_uuid, "sender_name": sub.sender_name, "account_holder_name": sub.account_holder_name,
-               "relationship": sub.relationship, "bank": sub.bank_id, "amount": sub.amount,
-               "bank_reference_no": sub.bank_reference_no, "payment_method_code": sub.payment_method_code}
-    form = ReceiptForm(request.POST or None, initial=initial)
+               "relationship": sub.relationship, "bank": sub.bank_id, "amount": f"{sub.amount:.2f}".replace(".", ","),
+               "bank_reference_no": sub.bank_reference_no, "payment_method_code": sub.payment_method_code,
+               "transaction_at": timezone.localtime(sub.transaction_at).strftime("%Y-%m-%dT%H:%M")}
+    form = ReceiptForm(request.POST or None, initial=initial, submission=sub)
     if request.method == "POST" and form.is_valid():
         data = dict(form.cleaned_data, client_uuid=sub.client_uuid)   # the identity of the receipt never changes
         try:
@@ -104,8 +121,10 @@ def receipt_edit(request, pk: int):
         except review.ReviewError as exc:
             messages.error(request, str(exc))
             return redirect("receipts:detail", pk=pk)
-        run_matching(actor=request.user, match_ids=[match.pk], quiet=True)
+        run_matching(actor=request.user, match_ids=[match.pk], quiet=True, promote_only=True)
         match.refresh_from_db()
         messages.success(request, f"Receipt #{sub.pk} corrected. Status: {'Verified' if match.teller_status == 'gfp' else 'Pending'}.")
         return redirect("receipts:detail", pk=pk)
-    return render(request, "receipts/edit.html", {"form": form, "branch": request.user.branch, "sub": sub, "editing": True})
+    popup = form.popup if request.method == "POST" else None       # red pop-up: the same data was entered before
+    return render(request, "receipts/edit.html", {"form": form, "branch": request.user.branch, "sub": sub, "editing": True,
+                                                  "popup_json": json.dumps(popup) if popup else ""})

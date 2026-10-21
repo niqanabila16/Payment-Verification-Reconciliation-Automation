@@ -12,6 +12,14 @@
       {% include "components/field.html" with field=form.role %}
       {% include "components/field.html" with field=form.branch %}
     </div>
+    <fieldset class="rights" data-cs-rights {% if form.role.value != "cs" %}hidden{% endif %}>
+      <legend class="field__label">{{ form.cs_rights.label }}</legend>
+      <div class="rights__list">
+        {% for box in form.cs_rights %}
+        <label class="switch"><input type="checkbox" role="switch" name="{{ box.data.name }}" value="{{ box.data.value }}" {% if box.data.selected %}checked{% endif %}><span class="switch__track" aria-hidden="true"></span><span class="switch__text">{{ box.choice_label }}</span></label>
+        {% endfor %}
+      </div>
+    </fieldset>
   </div>
   <div class="card__foot">
     <a class="btn" href="{% url 'accounts:user_list' %}">Cancel</a>

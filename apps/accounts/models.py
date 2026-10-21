@@ -21,11 +21,25 @@ class Branch(models.Model):
 
 
 class Role(models.TextChoices):
-    """The three roles defined by the SRS."""
+    """The roles of the system: the three of the SRS plus Customer Service (card activation, revision 2)."""
 
     TELLER = "teller", "Teller"
     FINANCE = "finance", "Finance"
     ADMIN = "admin", "Admin"
+    CS = "cs", "Customer service"
+
+
+class CsPerm:
+    """
+    What a Customer service (CS) account may do, stored as bits in ONE small integer (`User.cs_permissions`)
+    instead of a join table: three yes/no switches cost 2 bytes per user.
+    """
+
+    BATCH = 1        # add a new card batch (upload file) and deliver cards to a branch
+    ACTIVATION = 2   # process card activation requests (Activation Requested / Card Activated / Reject)
+    BLOCK = 4        # block a card of a branch (with a reason)
+    DEFAULT = BATCH | ACTIVATION   # the rights CS accounts had before permissions existed
+    CHOICES = [(BATCH, "Add card batch and deliver cards"), (ACTIVATION, "Process card activation"), (BLOCK, "Block card")]
 
 
 class UserManager(BaseUserManager):
@@ -59,9 +73,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     role = models.CharField(max_length=10, choices=Role.choices)
     branch = models.ForeignKey(
         Branch, null=True, blank=True, on_delete=models.PROTECT, related_name="users",
-        help_text="Required for tellers; empty for Finance and Admin.",
+        help_text="Required for tellers; empty for Finance, Customer service and Admin.",
     )
     is_active = models.BooleanField(default=True)
+    cs_permissions = models.PositiveSmallIntegerField(default=CsPerm.DEFAULT, help_text="Customer service only: bit flags, see CsPerm.")
     created_at = models.DateTimeField(default=timezone.now)
 
     objects = UserManager()
@@ -91,25 +106,20 @@ class User(AbstractBaseUser, PermissionsMixin):
         return self.role == Role.ADMIN
 
     @property
+    def is_cs(self) -> bool:
+        return self.role == Role.CS
+
+    def can_cs(self, flag: int) -> bool:
+        """True for a Customer service account that holds the permission `flag` (CsPerm.*)."""
+        return self.role == Role.CS and bool(self.cs_permissions & flag)
+
+    @property
     def landing_url_name(self) -> str:
         """Where this role starts after signing in."""
         return {
             Role.TELLER: "receipts:new",
             Role.FINANCE: "reconciliation:queue",
             Role.ADMIN: "accounts:user_list",
+            Role.CS: "cards:cs_cards",
         }[self.role]
 
-
-class PasswordResetRequest(models.Model):
-    """
-    "Forgot password": Teller/Finance cannot change their own password, so they send a request and an
-    Admin resets it. One open request per user (no spam); handled_at is set when the Admin resets the password.
-    """
-
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="reset_requests")
-    created_at = models.DateTimeField(default=timezone.now)
-    handled_at = models.DateTimeField(null=True, blank=True)
-    handled_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
-
-    class Meta:
-        ordering = ["created_at"]

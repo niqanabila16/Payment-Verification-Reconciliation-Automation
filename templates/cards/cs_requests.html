@@ -1,0 +1,57 @@
+{% extends "base.html" %}{% load ui static %}
+{% block title %}Activation requests{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Activation requests</h1></div>
+
+<div class="card card--flush" data-region="requests">
+  <nav class="tabs" aria-label="Request status">{% for key, label, count in tabs %}<a href="?status={{ key }}" {% if key == status %}aria-current="page"{% endif %}>{{ label }} <span class="count">{{ count }}</span></a>{% endfor %}</nav>
+  <form class="filters" method="get" role="search" data-ajax-get><input type="hidden" name="status" value="{{ status }}">
+    <input class="input input--grow" name="q" type="search" value="{{ q }}" placeholder="Search customer name or card number" aria-label="Search customer name or card number">
+    <button class="btn" type="submit">{% icon "search" %} Search</button></form>
+  <div class="table-wrap"><table class="table" data-pdf-list>
+    <thead><tr><th>No</th><th>Customer</th><th>Card No</th><th>Branch</th><th>Sent</th><th>Status</th><th>Follow up</th><th>Note</th><th><span class="visually-hidden">Update</span></th></tr></thead>
+    <tbody>
+    {% for r in page.object_list %}
+      <tr>
+        <td>{{ page.start_index|add:forloop.counter0 }}</td>
+        <td><button class="link-button" type="button" data-pdf-url="{% url 'cards:request_file' r.pk %}" data-pdf-name="{{ r.customer_name|default:r.file_name }}">{% icon "file-text" %} {{ r.customer_name|default:r.file_name }}</button>
+          {% if r.customer_name %}<span class="sub">{{ r.id_no }} &middot; {{ r.get_reason_display }}</span>{% endif %}</td>
+        <td>{% if r.card %}<span class="ref">{{ r.card.card_no }}</span>{% else %}-{% endif %}</td>
+        <td>{{ r.branch.code }}</td>
+        <td>{{ r.submitted_at|date:"d M Y H:i" }}</td>
+        <td>{% include "cards/_status_badge.html" with tone=r.tone label=r.get_status_display %}</td>
+        <td>{{ r.get_follow_up_display|default:"-" }}</td>
+        <td>{{ r.note_text|default:"-" }}</td>
+        <td>{% if can_manage and r.status == 0 or can_manage and r.status == 1 %}
+          <button class="btn btn--sm" type="button" data-status-open data-action="{% url 'cards:cs_request_status' r.pk %}" data-name="{{ r.customer_name|default:r.file_name }}" data-current="{{ r.status }}">Update status</button>{% endif %}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="9"><div class="empty"><h3>No requests</h3></div></td></tr>
+    {% endfor %}
+    </tbody></table></div>
+  {% include "components/pagination.html" with page=page %}
+</div>
+
+{% if can_manage %}
+<dialog class="dialog" id="status-dialog" aria-labelledby="status-title">
+  <form method="post" data-status-form data-ajax>{% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <div class="dialog__banner"><h2 id="status-title">Update status</h2></div>
+    <div class="dialog__body">
+      <p data-status-name></p>
+      <div class="field"><label class="field__label" for="id_status">New status</label>
+        <select class="input" id="id_status" name="status" data-status-select><option value="1" data-from="0">Activation Requested</option><option value="2" data-from="1">Card Activated</option><option value="3">Reject</option></select></div>
+      <div data-reject-fields hidden>
+        <div class="field"><label class="field__label" for="id_follow_up">Type</label>
+          <select class="input" id="id_follow_up" name="follow_up"><option value="">Choose a type</option>{% for v, l in status_form.fields.follow_up.choices %}{% if v != "" %}<option value="{{ v }}">{{ l }}</option>{% endif %}{% endfor %}</select></div>
+        <div class="field"><label class="field__label" for="id_reject_reason">Reason</label>
+          <select class="input" id="id_reject_reason" name="reject_reason"><option value="">Choose a reason</option>{% for v, l in status_form.fields.reject_reason.choices %}{% if v != "" %}<option value="{{ v }}">{{ l }}</option>{% endif %}{% endfor %}</select></div>
+      </div>
+    </div>
+    <div class="dialog__foot"><button class="btn" type="button" data-close-dialog>Cancel</button><button class="btn btn--primary" type="submit">Save</button></div>
+  </form>
+</dialog>
+{% endif %}
+{% include "cards/_pdf_modal.html" %}
+{% endblock %}
+{% block scripts %}<script src="{% static 'js/pdf_preview.js' %}?v=1" defer></script><script src="{% static 'js/card_select.js' %}?v=3" defer></script>{% endblock %}

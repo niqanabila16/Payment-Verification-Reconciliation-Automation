@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Django command-line entry point (runserver, migrate, test, seed_, ...)."""
+"""Django command-line entry point (runserver, migrate, test, seed_demo, ...)."""
 import os
 import sys
 

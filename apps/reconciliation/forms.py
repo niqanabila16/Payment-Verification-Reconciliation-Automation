@@ -1,19 +1,29 @@
 """Forms for the Finance screens."""
 from django import forms
 from django.conf import settings
+from django.utils import timezone
 
 from apps.accounts.models import Branch
 from apps.core.forms_base import StyledFormMixin
+from apps.core.models import Bank, TransactionDescription
 
 
 class StatementUploadForm(StyledFormMixin, forms.Form):
+    bank = forms.ModelChoiceField(
+        label="Bank", queryset=Bank.objects.none(), empty_label="Select bank",
+        error_messages={"required": "Select the bank this statement comes from."})
     file = forms.FileField(
         label="Bank statement (CSV or XLSX)",
         widget=forms.ClearableFileInput(attrs={"accept": ".csv,.xlsx"}),
         error_messages={"required": "Choose a statement file to upload."})
-    # Shown only after row 1 of a file could not be read.
+    # Shown only after row 1 of an RHB file could not be read.
     account_number = forms.CharField(label="Account number", required=False, max_length=30)
     statement_date = forms.DateField(label="Statement date", required=False, widget=forms.DateInput(attrs={"type": "date"}))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Only active banks that have a statement reader can be chosen.
+        self.fields["bank"].queryset = Bank.objects.filter(is_active=True).exclude(statement_format="")
 
     def clean_file(self):
         upload = self.cleaned_data["file"]
@@ -24,9 +34,15 @@ class StatementUploadForm(StyledFormMixin, forms.Form):
         return upload
 
 
-class ReassignForm(StyledFormMixin, forms.Form):
-    branch = forms.ModelChoiceField(label="Move to branch", queryset=Branch.objects.none(), empty_label="Select a branch")
+class ReportForm(StyledFormMixin, forms.Form):
+    period = forms.ChoiceField(label="Report", choices=[("weekly", "Weekly (Monday to Sunday)"), ("monthly", "Monthly")], initial="weekly")
+    date = forms.DateField(label="Any date in the period", widget=forms.DateInput(attrs={"type": "date"}), initial=timezone.localdate)
+    bank = forms.ModelChoiceField(label="Bank", queryset=Bank.objects.none(), required=False, empty_label="All banks")
+    description = forms.ChoiceField(label="Transaction description", required=False, choices=[])
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["branch"].queryset = Branch.objects.filter(is_active=True)
+        self.fields["bank"].queryset = Bank.objects.exclude(statement_format="")
+        names = TransactionDescription.objects.filter(is_active=True).order_by("name").values_list("name", flat=True).distinct()
+        self.fields["description"].choices = [("", "All descriptions")] + [(n, n) for n in names]
+        self.fields["date"].initial = timezone.localdate()

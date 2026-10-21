@@ -1,0 +1,32 @@
+{% load ui %}
+{# Card dashboard (all roles). Needs: dash (services.dashboard). The numbers refresh by themselves (js/card_dashboard.js). #}
+{% with t=dash.total %}
+<div class="dash" data-dash data-dash-url="{% url 'cards:dashboard_data' %}">
+
+  <section class="card dash__total" aria-labelledby="dash-total"><div class="card__body">
+    <h2 class="dash__title" id="dash-total">All branches</h2>
+    <dl class="tiles">
+      {% include "cards/_metric.html" with label="Total Undisbursed Card" key="total.undisbursed" value=t.undisbursed %}
+      {% include "cards/_metric.html" with label="Total Disbursed" key="total.disbursed" value=t.disbursed %}
+      {% include "cards/_metric.html" with label="Collected by Customer" key="total.collected" value=t.collected %}
+      {% include "cards/_metric.html" with label="Remaining Card" key="total.remaining" value=t.remaining %}
+      {% include "cards/_metric.html" with label="Block Card" key="total.blocked" value=t.blocked tone="danger" %}
+    </dl>
+  </div></section>
+  <section class="card dash__stage" aria-label="Branches"><div class="card__body">
+  <div class="dash__grid">
+    {% for b in dash.branches %}
+    <section class="card dash__branch {% if b.mine %}dash__branch--mine{% endif %}" aria-labelledby="dash-b{{ b.id }}"><div class="card__body">
+      <h2 class="dash__title" id="dash-b{{ b.id }}">{{ b.label }}</h2>
+      <dl class="rows">
+        {% include "cards/_metric.html" with label="Total Disbursed" key=b|branch_key:"disbursed" value=b.disbursed|dash_value:b.empty %}
+        {% include "cards/_metric.html" with label="Collected by Customer" key=b|branch_key:"collected" value=b.collected|dash_value:b.empty %}
+        {% include "cards/_metric.html" with label="Remaining Card" key=b|branch_key:"remaining" value=b.remaining|dash_value:b.empty %}
+        {% include "cards/_metric.html" with label="Block Card" key=b|branch_key:"blocked" value=b.blocked|dash_value:b.empty tone="danger" %}
+      </dl>
+    </div></section>
+    {% endfor %}
+  </div>
+  </div></section>
+</div>
+{% endwith %}

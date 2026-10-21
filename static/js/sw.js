@@ -4,8 +4,8 @@
      form at night and queue receipts (receipts.js stores them and syncs later).
    - Shows desktop notifications and opens the right page when one is clicked.
    Needs HTTPS or localhost (browser rule for service workers). */
-const STATIC_CACHE = 'static-v1';
-const PAGES_CACHE = 'pages-v1';
+const STATIC_CACHE = 'static-v2';
+const PAGES_CACHE = 'pages-v2';
 const OFFLINE_PAGE_PATH = '/teller/';
 
 self.addEventListener('install', () => self.skipWaiting());

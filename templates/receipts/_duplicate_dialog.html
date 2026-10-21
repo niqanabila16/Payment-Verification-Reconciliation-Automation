@@ -1,0 +1,10 @@
+{% load ui %}
+{# Red pop-up for data that was entered before. On the new-receipt page receipts.js fills it; on the correction page receipt_edit.js opens it from data-popup. #}
+<dialog class="dialog dialog--danger" id="duplicate-dialog" role="alertdialog" aria-labelledby="duplicate-title" aria-describedby="duplicate-body" {% if popup_json %}data-popup="{{ popup_json }}"{% endif %}>
+  <div class="dialog__banner">{% icon "x-circle" %}<h2 id="duplicate-title" data-duplicate-title>Already entered</h2></div>
+  <div class="dialog__body" id="duplicate-body">
+    <p data-duplicate-message>This transaction was entered before. It cannot be entered again.</p>
+    <dl class="meta" data-duplicate-details></dl>
+  </div>
+  <div class="dialog__foot"><button class="btn" type="button" data-close-dialog autofocus>Close</button></div>
+</dialog>

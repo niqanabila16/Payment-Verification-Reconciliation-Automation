@@ -1,310 +1,314 @@
-"""Tests for parsing, matching rules (BR-1, BR-2, BR-6, BR-8, BR-10) and Finance review actions."""
+"""Tests for the bank readers, the matching rules, Finance review actions, retention and the Finance screens (revision 2)."""
 from datetime import timedelta
+from datetime import date
 from decimal import Decimal
+from io import BytesIO
 
-from django.core.management import call_command
 from django.test import TestCase, override_settings
+from django.urls import reverse
 from django.utils import timezone
+from openpyxl import load_workbook
 
-from apps.core.models import AuditLog, Notification
-from apps.core.normalize import normalize_reference, parse_amount
-from apps.core.testing import SAMPLE_DIR, credit_row, csv_upload, make_world, receipt
+from apps.core.models import AuditLog, TransactionDescription
+from apps.core.normalize import normalize_reference
+from apps.core.testing import (ALB_XLSX, PASSWORD, PBB_XLSX, SAMPLE_DIR, credit_row, make_world, qr_row, receipt, upload_generic,
+                               upload_statement, xlsx_statement)
 
 from .models import MatchStatus, ReconciliationMatch, StatementEntry, StatementImport
 from .services import review
 from .services.engine import run_matching
-from .services.importer import DuplicateImportError, start_import
-from .services.parser import StatementParseError, parse_statement
+from .services.importer import start_import
+from .services.parser import (parse_statement, rhb_qr_reference, rhb_sender_name, clean_bank_ref, split_alb_reference)
+from .services.report import build_report
+from .services.retention import purge_expired
 
 
-class NormalizeTests(TestCase):
-    def test_br2_ignores_case_spaces_hyphens_dots(self):
-        for raw in ("8812-3456", "8812 3456", "88.12.34.56", " 88123456 "):
-            self.assertEqual(normalize_reference(raw), "88123456")
-        self.assertEqual(normalize_reference("ab-12"), "AB12")
+def status(sub):
+    sub.match.refresh_from_db()
+    return sub.match.match_status
 
-    def test_excel_float_reference(self):
-        self.assertEqual(normalize_reference(611380310.0), "611380310")
-        self.assertEqual(normalize_reference("611380310.0"), "611380310")
 
-    def test_amount_parsing(self):
-        self.assertEqual(parse_amount("1,200.5"), Decimal("1200.50"))
-        self.assertIsNone(parse_amount(""))
-        with self.assertRaises(ValueError):
-            parse_amount("abc")
+def upload_xlsx(user, bank, rows, name):
+    import hashlib
+    data = xlsx_statement(rows)
+    imp = start_import(user=user, bank=bank, data=data, digest=hashlib.sha256(data).hexdigest(), file_name=name)
+    imp.refresh_from_db()
+    return imp
 
 
 class ParserTests(TestCase):
-    def test_sample_csv_and_xlsx_parse_identically(self):
-        csv_result = parse_statement((SAMPLE_DIR / "mandiri_statement_2026-09-30.csv").read_bytes(), "a.csv")
-        xlsx_result = parse_statement((SAMPLE_DIR / "mandiri_statement_2026-09-30.xlsx").read_bytes(), "a.xlsx")
-        self.assertEqual(len(csv_result.rows), 10)
-        self.assertEqual([r.bank_ref_no for r in csv_result.rows], [r.bank_ref_no for r in xlsx_result.rows])
-        self.assertEqual(csv_result.account_number, "1230009876543")
-        self.assertEqual(str(csv_result.statement_date), "2026-09-30")
+    def test_rhb_helpers(self):
+        self.assertEqual(rhb_sender_name(" ZARIEAM/ ALI/"), "ZARIEAM")
+        self.assertEqual(rhb_qr_reference(" RHBQR049318/20260925TNGDMYNB030OQR85237862"), "QR85237862")
+        self.assertEqual(rhb_qr_reference("/oce"), "")
+        self.assertEqual(clean_bank_ref("'0000006932"), "0000006932")
 
-    def test_br3_br4_br5_rows_1_and_3_ignored_header_on_row_4(self):
-        parsed = parse_statement((SAMPLE_DIR / "mandiri_statement_2026-09-30.csv").read_bytes(), "a.csv")
-        self.assertEqual(parsed.rows[0].source_row, 5)                 # first transaction sits on row 5
-        self.assertNotIn("Current Account", [r.description for r in parsed.rows])
+    def test_alb_reference_2_is_name_slash_reference_third_part_ignored(self):
+        self.assertEqual(split_alb_reference("YOSEPIN ISABELA/RPP260829309437120"), ("YOSEPIN ISABELA", "RPP260829309437120"))
+        self.assertEqual(split_alb_reference("Javinci Berkat/RPP260828309298341/INARA GROUP SDN"), ("Javinci Berkat", "RPP260828309298341"))
 
-    def test_wrong_header_row_gives_actionable_error(self):
-        bad = b"Balance of Account 1 / X as at 30/09/2026\n\n\nWrong,Header\n1,2\n"
-        with self.assertRaisesMessage(StatementParseError, "Row 4 must contain the column headers"):
-            parse_statement(bad, "x.csv")
+    def test_rhb_real_sample(self):
+        parsed = parse_statement((SAMPLE_DIR / "RHB_statement_sample.xlsx").read_bytes(), "a.xlsx", "rhb")
+        first = parsed.rows[0]
+        self.assertEqual((first.counterparty_name, first.reference, first.amount), ("ZARIEAM", "QR85417923", Decimal("500")))
+        plain = next(r for r in parsed.rows if r.description == "RPP INWARD INST TRF")
+        self.assertEqual(plain.reference, "0000006932")           # Bank Ref No., apostrophe removed
 
-    def test_unreadable_row1_asks_for_manual_details(self):
-        bad = csv_upload([credit_row("REF123456", "10.00", "B1")]).read()
-        bad = bad.replace(b"Balance of Account 1230009876543 / Mandiri - Cust Ac as at 30/09/2026", b"Some unexpected title")
-        with self.assertRaisesMessage(StatementParseError, "Row 1"):
-            parse_statement(bad, "x.csv")
-        ok = parse_statement(bad, "x.csv", fallback_account="999", fallback_date=timezone.localdate())
-        self.assertEqual(ok.account_number, "999")
+    def test_alb_real_sample_only_duitnow_cr_trf_ca_is_matchable(self):
+        parsed = parse_statement((SAMPLE_DIR / "ALB_statement_sample.xlsx").read_bytes(), "a.xlsx", "alb")
+        for row in parsed.rows:
+            self.assertEqual(row.matchable, row.description == "DuitNow CR Trf CA")
+        first = parsed.rows[0]
+        self.assertEqual((first.counterparty_name, first.reference), ("YOSEPIN ISABELA", "RPP260829309437120"))
+        self.assertTrue(parsed.open_item_only)
 
-    def test_duplicate_ref_inside_file_and_invalid_rows_are_reported(self):
-        upload = csv_upload([credit_row("REF111111", "10.00", "B1"), credit_row("REF111111", "10.00", "B1"),
-                             credit_row("REF222222", "abc", "B2"), credit_row("REF333333", "5.00", "")])
-        parsed = parse_statement(upload.read(), "x.csv")
-        self.assertEqual(len(parsed.rows), 1)
-        self.assertEqual(parsed.duplicates_in_file, 1)
-        self.assertEqual(len(parsed.skipped), 2)
-
-    def test_unsupported_extension(self):
-        with self.assertRaises(StatementParseError):
-            parse_statement(b"x", "statement.pdf")
+    def test_pbb_real_sample_only_duitnow_trsf_cr_is_matchable(self):
+        parsed = parse_statement((SAMPLE_DIR / "PBB_statement_sample.xlsx").read_bytes(), "a.xlsx", "pbb")
+        self.assertTrue(parsed.rows)
+        for row in parsed.rows:
+            self.assertEqual(row.matchable, row.description == "DUITNOW TRSF CR")
 
 
 @override_settings(IMPORT_RUN_SYNC=True)
-class EngineTests(TestCase):
+class MatchingTests(TestCase):
     def setUp(self):
         self.w = make_world()
 
-    def upload(self, rows, **kwargs):
-        return start_import(user=self.w["finance"], bank=self.w["mandiri"], uploaded_file=csv_upload(rows, **kwargs))
+    def test_exact_match_is_gfp(self):
+        sub = receipt(self.w["teller"], self.w["rhb"], "150.00", "REF123456", sender="CUSTOMER ONE")
+        upload_statement(self.w["finance"], [credit_row("REF123456", "150.00")])
+        self.assertEqual(status(sub), MatchStatus.GFP)
 
-    def status_of(self, sub):
-        return ReconciliationMatch.objects.get(teller_submission=sub).match_status
+    def test_name_is_compared_with_the_account_holder_not_the_sender(self):
+        sub = receipt(self.w["teller"], self.w["rhb"], "150.00", "REF123456", sender="SOMEONE ELSE", holder="CUSTOMER ONE")
+        upload_statement(self.w["finance"], [credit_row("REF123456", "150.00", name="CUSTOMER ONE")])
+        self.assertEqual(status(sub), MatchStatus.GFP)
 
-    def test_full_demo_scenario(self):
-        call_command("seed_demo", verbosity=0)
-        from django.core.files.uploadedfile import SimpleUploadedFile
-        from apps.core.models import Bank
-        upload = SimpleUploadedFile("s.csv", (SAMPLE_DIR / "mandiri_statement_2026-09-30.csv").read_bytes())
-        imp = start_import(user=self.w["finance"], bank=Bank.objects.get(code="MANDIRI"), uploaded_file=upload)
-        imp.refresh_from_db()
-        self.assertEqual(imp.status, "processed")
-        self.assertEqual({k: imp.result_summary[k] for k in ("gfp", "typo", "manual_review", "not_found")},
-                         {"gfp": 5, "typo": 1, "manual_review": 1, "not_found": 1})
+    def test_reference_is_not_a_matching_parameter_name_and_amount_are(self):
+        sub = receipt(self.w["teller"], self.w["rhb"], "1000.00", "05831232", sender="KARYATI LESTARI", holder="KARYATI LESTARI")
+        upload_statement(self.w["finance"], [credit_row("0000002895", "1000.00", name="LESTARI KARYATI", description="RPP INWARD INST TRF")])
+        self.assertEqual(status(sub), MatchStatus.GFP)
 
-    def test_exact_match_is_gfp_and_teller_is_notified(self):
-        sub = receipt(self.w["teller"], self.w["mandiri"], "150.00", "ref-1234 56")
-        self.upload([credit_row("REF123456", "150.00", "B1")])
-        self.assertEqual(self.status_of(sub), MatchStatus.GFP)
-        self.assertTrue(Notification.objects.filter(recipient=self.w["teller"], type="result_gfp").exists())
+    def test_name_difference_is_not_found_not_review(self):
+        sub = receipt(self.w["teller"], self.w["rhb"], "150.00", "REF123456", sender="CUSTOMER ONE")
+        upload_statement(self.w["finance"], [credit_row("REF123456", "150.00", name="TOTALLY DIFFERENT")])
+        self.assertEqual(status(sub), MatchStatus.NOT_FOUND)
 
-    def test_br8_amount_difference_never_auto_verified(self):
-        sub = receipt(self.w["teller"], self.w["mandiri"], "150.00", "REF123456")
-        self.upload([credit_row("REF123456", "150.01", "B1")])          # one sen off
-        match = ReconciliationMatch.objects.get(teller_submission=sub)
-        self.assertEqual(match.match_status, MatchStatus.MANUAL_REVIEW)
-        self.assertIsNone(match.bank_statement_entry)                    # only a suggestion, not a final link
-        self.assertIsNotNone(match.suggested_bank_statement_entry)
+    def test_amount_difference_goes_to_review_with_reason(self):
+        sub = receipt(self.w["teller"], self.w["rhb"], "150.00", "REF123456")
+        upload_statement(self.w["finance"], [credit_row("OTHERREF99", "140.00")])
+        sub.match.refresh_from_db()
+        self.assertEqual(sub.match.match_status, MatchStatus.MANUAL_REVIEW)
+        self.assertEqual(sub.match.review_reasons, ["amount"])
 
-    def test_typo_is_only_a_suggestion(self):
-        sub = receipt(self.w["teller"], self.w["mandiri"], "320.00", "99120054")
-        self.upload([credit_row("99120045", "320.00", "B1")])
-        match = ReconciliationMatch.objects.get(teller_submission=sub)
-        self.assertEqual(match.match_status, MatchStatus.TYPO)
-        self.assertIsNone(match.bank_statement_entry)
-        self.assertGreaterEqual(match.match_score, 80)
+    def test_rhb_qr_rows_match_on_the_qr_id_not_the_bank_ref_no(self):
+        sub = receipt(self.w["teller"], self.w["rhb"], "50.00", "QR84400381")
+        upload_statement(self.w["finance"], [qr_row("QR84400381", "50.00", ref_no="0000009999")])
+        self.assertEqual(status(sub), MatchStatus.GFP)
 
-    def test_br6_every_receipt_gets_a_definite_outcome(self):
-        sub = receipt(self.w["teller"], self.w["mandiri"], "10.00", "NOTHINGHERE")
-        self.upload([credit_row("OTHER99999", "77.00", "B1")])
-        self.assertEqual(self.status_of(sub), MatchStatus.NOT_FOUND)
+    def test_only_the_selected_bank_is_matched(self):
+        rhb_sub = receipt(self.w["teller"], self.w["rhb"], "150.00", "REF123456")
+        alb_sub = receipt(self.w["teller"], self.w["alb"], "150.00", "REF123456")
+        upload_statement(self.w["finance"], [credit_row("REF123456", "150.00")])
+        self.assertEqual(status(rhb_sub), MatchStatus.GFP)
+        self.assertEqual(status(alb_sub), MatchStatus.PENDING)
 
-    def test_bank_is_respected(self):
-        sub = receipt(self.w["teller"], self.w["rhb"], "150.00", "REF123456")   # receipt says RHB, statement is Mandiri
-        self.upload([credit_row("REF123456", "150.00", "B1")])
-        self.assertEqual(self.status_of(sub), MatchStatus.NOT_FOUND)
+    def test_same_name_and_amount_at_different_times_use_one_bank_row_each(self):
+        first = receipt(self.w["teller"], self.w["rhb"], "150.00", "REF123456")
+        second = receipt(self.w["teller"], self.w["rhb"], "150.00", "REF999999")
+        upload_statement(self.w["finance"], [credit_row("B1", "150.00"), credit_row("B2", "150.00")])
+        self.assertEqual((status(first), status(second)), (MatchStatus.GFP, MatchStatus.GFP))
+        self.assertNotEqual(first.match.bank_statement_entry_id, second.match.bank_statement_entry_id)
 
-    def test_one_bank_row_serves_only_one_receipt(self):
-        a = receipt(self.w["teller"], self.w["mandiri"], "150.00", "REF123456", sender="A")
-        b = receipt(self.w["teller2"], self.w["mandiri"], "150.00", "REF-123456", sender="B")   # same normalised ref
-        self.upload([credit_row("REF123456", "150.00", "B1")])
-        statuses = sorted([self.status_of(a), self.status_of(b)])
-        self.assertEqual(statuses, [MatchStatus.GFP, MatchStatus.NOT_FOUND])
+    def test_one_bank_row_serves_one_receipt(self):
+        first = receipt(self.w["teller"], self.w["rhb"], "150.00", "REF123456")
+        second = receipt(self.w["teller2"], self.w["rhb"], "150.00", "REF123456X", sender="CUSTOMER ONE")
+        upload_statement(self.w["finance"], [credit_row("REF123456", "150.00")])
+        self.assertEqual(sorted([status(first), status(second)]).count(MatchStatus.GFP), 1)
 
-    def test_debit_rows_are_never_matched(self):
-        sub = receipt(self.w["teller"], self.w["mandiri"], "5.00", "FEE1234567")
-        self.upload([["SERVICE CHARGE DR", "0100", "5.00", "", "", "FEE1234567", "", "B1"]])
-        self.assertEqual(self.status_of(sub), MatchStatus.NOT_FOUND)
+    def test_alb_matches_duitnow_rows_and_keeps_other_rows_as_open_items(self):
+        sub = receipt(self.w["teller"], self.w["alb"], "7000.00", "RPP260829000000001", sender="TESTER ONE")
+        imp = upload_xlsx(self.w["finance"], self.w["alb"], ALB_XLSX, "alb.xlsx")
+        self.assertEqual(status(sub), MatchStatus.GFP)
+        cdm = StatementEntry.objects.get(description="CDM CA CSH DEP-W/O C")
+        self.assertFalse(cdm.matchable)
+        self.assertEqual(StatementEntry.objects.filter(matchable=False).count(), 2)
+        self.assertEqual(imp.bank, self.w["alb"])
 
-    def test_br10_late_statement_still_matches_old_receipt(self):
-        old = timezone.now() - timedelta(days=20)
-        sub = receipt(self.w["teller"], self.w["mandiri"], "150.00", "REF123456", entered_at=old)
-        self.upload([credit_row("OTHER99999", "1.00", "B1")], date="01/09/2026", account="111")
-        self.assertEqual(self.status_of(sub), MatchStatus.NOT_FOUND)
-        self.upload([credit_row("REF123456", "150.00", "B2")], date="20/09/2026", account="222")
-        self.assertEqual(self.status_of(sub), MatchStatus.GFP)
+    def test_pbb_matches_only_duitnow_trsf_cr_rows(self):
+        sub = receipt(self.w["teller"], self.w["pbb"], "22500.00", "338623", sender="TESTER TWO")
+        other = receipt(self.w["teller"], self.w["pbb"], "1345.15", "000000", sender="FROM 3999XXXXXX")
+        upload_xlsx(self.w["finance"], self.w["pbb"], PBB_XLSX, "pbb.xlsx")
+        self.assertEqual(status(sub), MatchStatus.GFP)
+        self.assertNotEqual(status(other), MatchStatus.GFP)
 
-    def test_engine_stops_retrying_after_the_window(self):
-        old = timezone.now() - timedelta(days=40)
-        sub = receipt(self.w["teller"], self.w["mandiri"], "150.00", "REF123456")
-        ReconciliationMatch.objects.filter(teller_submission=sub).update(first_seen_at=old, match_status=MatchStatus.NOT_FOUND)
-        self.upload([credit_row("REF123456", "150.00", "B1")])
-        self.assertEqual(self.status_of(sub), MatchStatus.NOT_FOUND)     # aged: Finance must decide
-
-    def test_br1_same_file_cannot_be_imported_twice(self):
-        rows = [credit_row("REF123456", "150.00", "B1")]
-        self.upload(rows)
-        with self.assertRaisesMessage(DuplicateImportError, "already imported"):
-            self.upload(rows)
-        self.assertEqual(StatementImport.objects.count(), 1)
-
-    def test_br1_same_statement_date_cannot_be_imported_twice(self):
-        self.upload([credit_row("REF123456", "150.00", "B1")])
-        with self.assertRaises(DuplicateImportError):
-            self.upload([credit_row("REF999999", "9.00", "B9")])         # different content, same account + date
-
-    def test_br1_overlapping_periods_do_not_duplicate_rows(self):
-        self.upload([credit_row("REF123456", "150.00", "B1"), credit_row("REF222222", "20.00", "B2")], date="29/09/2026")
-        imp = self.upload([credit_row("REF222222", "20.00", "B2"), credit_row("REF333333", "30.00", "B3")], date="30/09/2026")
-        imp.refresh_from_db()
-        self.assertEqual(imp.result_summary["rows_added"], 1)
-        self.assertEqual(imp.result_summary["rows_skipped_overlap"], 1)
-        self.assertEqual(StatementEntry.objects.count(), 3)
-
-    def test_rerun_without_new_data_changes_nothing(self):
-        receipt(self.w["teller"], self.w["mandiri"], "150.00", "REF123456")
-        self.upload([credit_row("REF123456", "150.00", "B1")])
-        summary = run_matching()
-        self.assertEqual(summary.evaluated, 0)                           # verified items are left alone
-
-    def test_failed_import_can_be_retried(self):
-        rows = [credit_row("REF123456", "150.00", "B1")]
-        imp = self.upload(rows)
-        StatementImport.objects.filter(pk=imp.pk).update(status="failed")
-        retry = self.upload(rows)
-        retry.refresh_from_db()
-        self.assertEqual(retry.status, "processed")
+    def test_only_extracted_columns_are_stored(self):
+        upload_statement(self.w["finance"], [credit_row("REF123456", "150.00")])
+        names = {f.name for f in StatementEntry._meta.get_fields()}
+        self.assertNotIn("raw_columns", names)
+        self.assertNotIn("references", names)
 
 
 @override_settings(IMPORT_RUN_SYNC=True)
 class ReviewTests(TestCase):
     def setUp(self):
         self.w = make_world()
-        self.typo_sub = receipt(self.w["teller"], self.w["mandiri"], "320.00", "99120054")
-        self.diff_sub = receipt(self.w["teller2"], self.w["mandiri"], "205.00", "55302211", sender="LIM")
-        start_import(user=self.w["finance"], bank=self.w["mandiri"],
-                     uploaded_file=csv_upload([credit_row("99120045", "320.00", "B1"), credit_row("55302211", "250.00", "B2")]))
-        self.typo = ReconciliationMatch.objects.get(teller_submission=self.typo_sub)
-        self.diff = ReconciliationMatch.objects.get(teller_submission=self.diff_sub)
+        self.sub = receipt(self.w["teller"], self.w["rhb"], "150.00", "REF123456")
+        upload_statement(self.w["finance"], [credit_row("REF123456", "140.00")])
+        self.match = ReconciliationMatch.objects.get(teller_submission=self.sub)
 
-    def test_confirm_typo_makes_final_match_and_notifies(self):
-        review.confirm_suggestion(self.typo, self.w["finance"])
-        self.typo.refresh_from_db()
-        self.assertEqual(self.typo.match_status, MatchStatus.GFP)
-        self.assertIsNotNone(self.typo.bank_statement_entry)
-        self.assertTrue(AuditLog.objects.filter(action="match.confirmed", entity_id=self.typo.pk).exists())
-
-    def test_confirming_an_amount_difference_requires_a_note(self):
+    def test_confirming_an_amount_difference_needs_a_note(self):
         with self.assertRaises(review.ReviewError):
-            review.confirm_suggestion(self.diff, self.w["finance"])
-        review.confirm_suggestion(self.diff, self.w["finance"], note="Customer paid RM 45 extra for a fee.")
-        self.diff.refresh_from_db()
-        self.assertEqual(self.diff.match_status, MatchStatus.GFP)
+            review.confirm_suggestion(self.match, self.w["finance"], "")
+        review.confirm_suggestion(self.match, self.w["finance"], "customer paid less, agreed")
+        self.assertEqual(status(self.sub), MatchStatus.GFP)
 
-    def test_confirm_twice_is_rejected(self):
-        review.confirm_suggestion(self.typo, self.w["finance"])
+    def test_reject_sets_reject_keeps_the_compared_row_and_notifies(self):
+        review.reject_receipt(self.match, self.w["finance"], "Amaun Salah")
+        self.match.refresh_from_db()
+        self.assertEqual(self.match.match_status, MatchStatus.REJECTED)
+        self.assertEqual(self.match.teller_status, "rejected")
+        self.assertIsNotNone(self.match.rejected_bank_statement_entry)
+        self.assertTrue(self.sub.submitted_by.notifications.filter(type="rejected").exists())
+
+    def test_reject_needs_a_listed_reason(self):
         with self.assertRaises(review.ReviewError):
-            review.confirm_suggestion(self.typo, self.w["finance"])
+            review.reject_receipt(self.match, self.w["finance"], "  ")
 
-    def test_reject_requires_reason_and_returns_to_not_found(self):
+    def test_reject_reason_is_a_dropdown_value_and_lain_lain_keeps_a_remark(self):
         with self.assertRaises(review.ReviewError):
-            review.reject_suggestion(self.typo, self.w["finance"], " ")
-        review.reject_suggestion(self.typo, self.w["finance"], "Different customer")
-        self.typo.refresh_from_db()
-        self.assertEqual(self.typo.match_status, MatchStatus.NOT_FOUND)
-        self.assertIsNone(self.typo.suggested_bank_statement_entry)
+            review.reject_receipt(self.match, self.w["finance"], "free text reason")
+        review.reject_receipt(self.match, self.w["finance"], "lain-lain", "bank slip unreadable")
+        self.match.refresh_from_db()
+        self.assertEqual(self.match.finance_note, "lain-lain: bank slip unreadable")
 
-    def test_close_requires_reason(self):
+    def test_reject_through_the_screen_uses_the_dropdown(self):
+        self.client.login(username="finance@t.test", password=PASSWORD)
+        html = self.client.get(reverse("reconciliation:detail", args=[self.match.pk])).content.decode()
+        for value in ("Nama Beda", "Amaun Salah", "lain-lain"):
+            self.assertIn(f'<option value="{value}">', html)
+        self.client.post(reverse("reconciliation:reject", args=[self.match.pk]), {"reject_reason": "Nama Beda"})
+        self.match.refresh_from_db()
+        self.assertEqual(self.match.finance_note, "Nama Beda")
+
+    def test_rejected_receipt_is_not_rematched_until_corrected(self):
+        review.reject_receipt(self.match, self.w["finance"], "Amaun Salah")
+        upload_statement(self.w["finance"], [credit_row("REF123456", "150.00", name="CUSTOMER ONE")], name="b.csv", date="29/09/2026")
+        self.assertEqual(status(self.sub), MatchStatus.REJECTED)
+
+    def test_correction_goes_back_to_pending_and_rematches(self):
+        review.reject_receipt(self.match, self.w["finance"], "Amaun Salah")
+        data = {"sender_name": self.sub.sender_name, "account_holder_name": self.sub.account_holder_name, "relationship": self.sub.relationship,
+                "bank": self.sub.bank, "amount": Decimal("140.00"), "bank_reference_no": "REF123456",
+                "payment_method_code": self.sub.payment_method_code, "transaction_at": self.sub.transaction_at}
+        review.correct_submission(self.match, self.w["teller"], data)
+        self.assertEqual(status(self.sub), MatchStatus.PENDING)    # back to Pending, as the Teller sees it
+        run_matching(match_ids=[self.match.pk], quiet=True, promote_only=True)
+        self.assertEqual(status(self.sub), MatchStatus.GFP)      # re-checked at once against the stored bank row
+
+    def test_unchanged_correction_is_refused(self):
+        review.reject_receipt(self.match, self.w["finance"], "Amaun Salah")
+        sub = self.sub
+        data = {"sender_name": sub.sender_name, "account_holder_name": sub.account_holder_name, "relationship": sub.relationship, "bank": sub.bank,
+                "amount": sub.amount, "bank_reference_no": sub.bank_reference_no, "payment_method_code": sub.payment_method_code,
+                "transaction_at": sub.transaction_at}
         with self.assertRaises(review.ReviewError):
-            review.close_match(self.diff, self.w["finance"], "short")
-        review.close_match(self.diff, self.w["finance"], "Customer cancelled the payment.")
-        self.diff.refresh_from_db()
-        self.assertEqual(self.diff.match_status, MatchStatus.CLOSED)
-        self.assertTrue(self.diff.closed_reason)
-
-    def test_manual_link_needs_note_and_free_row(self):
-        review.reject_suggestion(self.typo, self.w["finance"], "wrong")
-        entry = StatementEntry.objects.get(bank_ref_no="B1")
-        with self.assertRaises(review.ReviewError):
-            review.link_manually(self.typo, self.w["finance"], entry.pk, "")
-        review.link_manually(self.typo, self.w["finance"], entry.pk, "Verified by phone with customer")
-        other = receipt(self.w["teller"], self.w["mandiri"], "320.00", "ZZZZ999999", sender="OTHER")
-        other_match = ReconciliationMatch.objects.get(teller_submission=other)
-        with self.assertRaisesMessage(review.ReviewError, "already linked"):
-            review.link_manually(other_match, self.w["finance"], entry.pk, "try same row")
-
-    def test_feedback_posts_comment_and_notifies_teller(self):
-        review.send_feedback(self.typo, self.w["finance"], "Reference ends with 45")
-        self.assertEqual(self.typo.comments.count(), 1)
-        self.assertTrue(Notification.objects.filter(recipient=self.w["teller"], type="feedback").exists())
-
-    def test_teller_correction_resets_and_rematches(self):
-        data = {"sender_name": "CUSTOMER ONE", "account_holder_name": "CUSTOMER ONE", "relationship": "SELF",
-                "bank": self.w["mandiri"], "amount": Decimal("320.00"), "bank_reference_no": "99120045", "payment_method_code": "TRANSFER"}
-        review.correct_submission(self.typo, self.w["teller"], data)
-        self.typo.refresh_from_db()
-        self.assertEqual(self.typo.match_status, MatchStatus.PENDING)
-        run_matching(match_ids=[self.typo.pk], quiet=True)
-        self.typo.refresh_from_db()
-        self.assertEqual(self.typo.match_status, MatchStatus.GFP)
-
-    def test_correction_not_allowed_once_verified(self):
-        review.confirm_suggestion(self.typo, self.w["finance"])
-        with self.assertRaises(review.ReviewError):
-            review.correct_submission(self.typo, self.w["teller"], {})
-
-    def test_reassign_branch_notifies_new_branch(self):
-        review.reassign_branch(self.typo, self.w["finance"], self.w["pj"])
-        self.typo_sub.refresh_from_db()
-        self.assertEqual(self.typo_sub.branch, self.w["pj"])
-        self.assertTrue(Notification.objects.filter(recipient=self.w["teller2"], type="branch_reassigned").exists())
+            review.correct_submission(self.match, self.w["teller"], data)
 
 
 @override_settings(IMPORT_RUN_SYNC=True)
-class MaintenanceTests(TestCase):
+class RetentionTests(TestCase):
     def setUp(self):
         self.w = make_world()
 
-    def test_queue_is_oldest_first(self):
-        old = receipt(self.w["teller"], self.w["mandiri"], "10.00", "OLDREF12345", entered_at=timezone.now() - timedelta(days=3))
-        new = receipt(self.w["teller"], self.w["mandiri"], "11.00", "NEWREF12345")
-        ids = list(ReconciliationMatch.objects.values_list("teller_submission_id", flat=True))
-        self.assertEqual(ids, [old.pk, new.pk])
+    def test_bank_data_older_than_31_days_is_deleted_receipts_and_gfp_snapshot_stay(self):
+        sub = receipt(self.w["teller"], self.w["rhb"], "150.00", "REF123456")
+        imp = upload_statement(self.w["finance"], [credit_row("REF123456", "150.00"), credit_row("OTHER99", "10.00", name="X")])
+        StatementImport.objects.filter(pk=imp.pk).update(imported_at=timezone.now() - timedelta(days=32))
+        counts = purge_expired()
+        self.assertEqual(counts["imports"], 1)
+        self.assertEqual(StatementEntry.objects.count(), 0)
+        sub.match.refresh_from_db()
+        self.assertEqual(sub.match.match_status, MatchStatus.GFP)
+        self.assertEqual(sub.match.bank_snapshot["reference"], "REF123456")
 
-    def test_recover_imports_marks_stuck_imports_failed_and_allows_retry(self):
-        rows = [credit_row("REF123456", "150.00", "B1")]
-        imp = start_import(user=self.w["finance"], bank=self.w["mandiri"], uploaded_file=csv_upload(rows))
-        StatementImport.objects.filter(pk=imp.pk).update(status="processing", imported_at=timezone.now() - timedelta(hours=1))
-        call_command("recover_imports", verbosity=0)
-        imp.refresh_from_db()
-        self.assertEqual(imp.status, "failed")
-        again = start_import(user=self.w["finance"], bank=self.w["mandiri"], uploaded_file=csv_upload(rows))
-        again.refresh_from_db()
-        self.assertEqual(again.status, "processed")
+    def test_recent_data_is_kept(self):
+        upload_statement(self.w["finance"], [credit_row("REF123456", "150.00")])
+        StatementImport.objects.update(imported_at=timezone.now() - timedelta(days=30))
+        self.assertEqual(purge_expired()["imports"], 0)
 
-    def test_all_user_facing_text_is_english(self):
-        """BR-9: guard against Indonesian/Malay UI text slipping into templates or scripts."""
-        from pathlib import Path
-        root = Path(__file__).resolve().parents[2]
-        banned = ("tidak ", "silakan", "gagal", "simpan", "berhasil", "kirim ", "catatan", "pilih ", "belum ")
-        offenders = []
-        for folder, patterns in (("templates", ("*.html",)), ("static/js", ("*.js",))):
-            for pattern in patterns:
-                for path in (root / folder).rglob(pattern):
-                    text = path.read_text(encoding="utf-8").lower()
-                    offenders += [f"{path.name}: {word.strip()}" for word in banned if word in text]
-        self.assertEqual(offenders, [])
+    def test_review_receipt_returns_to_pending_when_its_row_is_purged(self):
+        sub = receipt(self.w["teller"], self.w["rhb"], "150.00", "REF123456")
+        imp = upload_statement(self.w["finance"], [credit_row("REF123456", "140.00")])
+        StatementImport.objects.filter(pk=imp.pk).update(imported_at=timezone.now() - timedelta(days=40))
+        purge_expired()
+        self.assertEqual(status(sub), MatchStatus.PENDING)
+
+
+@override_settings(IMPORT_RUN_SYNC=True)
+class FinanceScreenTests(TestCase):
+    def setUp(self):
+        self.w = make_world()
+        self.sub = receipt(self.w["teller"], self.w["rhb"], "150.00", "REF123456")
+        upload_statement(self.w["finance"], [credit_row("REF123456", "140.00"), credit_row("UNCLAIMED77", "75.00", name="STRANGER")])
+        self.match = ReconciliationMatch.objects.get(teller_submission=self.sub)
+        self.client.login(username="finance@t.test", password=PASSWORD)
+
+    def test_review_table_has_no_gfp_or_reject_buttons_only_detail(self):
+        html = self.client.get(reverse("reconciliation:queue") + "?tab=review").content.decode()
+        self.assertIn(reverse("reconciliation:detail", args=[self.match.pk]), html)
+        self.assertNotIn(reverse("reconciliation:confirm", args=[self.match.pk]), html)
+        self.assertNotIn(reverse("reconciliation:reject", args=[self.match.pk]), html)
+
+    def test_detail_has_note_gfp_and_reject_and_one_comparison(self):
+        html = self.client.get(reverse("reconciliation:detail", args=[self.match.pk])).content.decode()
+        self.assertIn(reverse("reconciliation:confirm", args=[self.match.pk]), html)
+        self.assertIn(reverse("reconciliation:reject", args=[self.match.pk]), html)
+        self.assertIn("is-diff", html)
+
+    def test_after_reject_the_detail_still_compares_with_the_bank_row(self):
+        self.client.post(reverse("reconciliation:reject", args=[self.match.pk]), {"reject_reason": "Amaun Salah"})
+        self.match.refresh_from_db()
+        self.assertEqual(self.match.match_status, MatchStatus.REJECTED)
+        html = self.client.get(reverse("reconciliation:detail", args=[self.match.pk])).content.decode()
+        self.assertIn("REF123456", html)
+        self.assertIn("is-diff", html)
+
+    def test_reject_tab_and_open_item_tab(self):
+        self.client.post(reverse("reconciliation:reject", args=[self.match.pk]), {"reject_reason": "Amaun Salah"})
+        self.assertIn("REF123456", self.client.get(reverse("reconciliation:queue") + "?tab=rejected").content.decode())
+        html = self.client.get(reverse("reconciliation:queue") + "?tab=open_item").content.decode()
+        self.assertIn("UNCLAIMED77", html)
+
+    def test_description_filter_options_come_from_master_data(self):
+        TransactionDescription.objects.create(name="My Custom Desc")
+        html = self.client.get(reverse("reconciliation:queue") + "?tab=open_item").content.decode()
+        self.assertIn("My Custom Desc", html)
+
+    def test_teller_sees_reject_and_it_is_listed_first(self):
+        other = receipt(self.w["teller"], self.w["rhb"], "20.00", "NEWER00001")
+        review.reject_receipt(self.match, self.w["finance"], "Amaun Salah")
+        self.client.logout()
+        self.client.login(username="teller@t.test", password=PASSWORD)
+        html = self.client.get(reverse("receipts:list")).content.decode()
+        self.assertIn("Reject", html)
+        self.assertLess(html.index("REF123456"), html.index("NEWER00001"))
+        self.assertTrue(other.pk)
+
+
+@override_settings(IMPORT_RUN_SYNC=True)
+class ReportTests(TestCase):
+    def test_report_has_description_filter_and_open_items(self):
+        w = make_world()
+        upload_statement(w["finance"], [credit_row("UNCLAIMED77", "75.00", name="STRANGER")])
+        today = date(2026, 9, 30)   # the date of the uploaded statement
+        data, _name = build_report("weekly", today, None, "RPP INWARD INST TRF CR")
+        values = [str(c.value) for sheet in load_workbook(BytesIO(data)).worksheets for row in sheet.iter_rows() for c in row]
+        self.assertIn("UNCLAIMED77", values)
+        header = [c.value for c in load_workbook(BytesIO(data))["Transactions"][1]]
+        self.assertNotIn("Receipt #", header)
+        self.assertNotIn("Name", header)
+        self.assertEqual(header.count("Account holder"), 1)
+        data, _name = build_report("weekly", today, None, "SI CR")
+        values = [str(c.value) for sheet in load_workbook(BytesIO(data)).worksheets for row in sheet.iter_rows() for c in row]
+        self.assertNotIn("UNCLAIMED77", values)

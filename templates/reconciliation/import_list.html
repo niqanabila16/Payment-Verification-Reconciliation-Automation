@@ -3,14 +3,14 @@
 {% block content %}
 <div class="page-head"><h1>Upload history</h1></div>
 <div class="card card--flush">
-  <div class="table-wrap"><table class="table"><thead><tr><th>File</th><th>Statement date</th><th class="num">Rows</th><th class="num">New rows</th><th>Uploaded</th><th>Status</th></tr></thead><tbody>
+  <div class="table-wrap"><table class="table"><thead><tr><th>File</th><th>Bank</th><th>Statement date</th><th class="num">Rows</th><th class="num">New rows</th><th>Uploaded</th><th>Status</th></tr></thead><tbody>
   {% for i in page.object_list %}
-    <tr><td><a href="{% url 'reconciliation:import_detail' i.pk %}">{{ i.file_name }}</a><span class="sub">Account {{ i.account_number }}</span></td><td>{{ i.statement_date|date:"d M Y" }}</td>
+    <tr><td><a href="{% url 'reconciliation:import_detail' i.pk %}">{{ i.file_name }}</a><span class="sub">Account {{ i.account_number }}</span></td><td>{{ i.bank.name }}</td><td>{{ i.statement_date|date:"d M Y" }}</td>
       <td class="num">{{ i.row_count|default:"-" }}</td><td class="num">{{ i.result_summary.rows_added|default_if_none:"-" }}</td>
       <td>{{ i.imported_at|date:"d M Y H:i" }}<span class="sub">{{ i.uploaded_by.name|default:"-" }}</span></td>
       <td>{% if i.status == "processed" %}<span class="badge badge--success">{% icon "check-circle" %}Processed</span>{% elif i.status == "failed" %}<span class="badge badge--danger">{% icon "x-circle" %}Failed</span>{% else %}<span class="badge badge--warning">{% icon "clock" %}Processing</span>{% endif %}</td></tr>
   {% empty %}
-    <tr><td colspan="6"><div class="empty">{% icon "upload" %}<h3>No uploads yet</h3></div></td></tr>
+    <tr><td colspan="7"><div class="empty">{% icon "upload" %}<h3>No uploads yet</h3></div></td></tr>
   {% endfor %}</tbody></table></div>
   {% include "components/pagination.html" %}
 </div>

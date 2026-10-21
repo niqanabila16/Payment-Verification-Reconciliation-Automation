@@ -1,5 +1,5 @@
 """
-Builds the demo bank statements in this folder (CSV and XLSX) with the exact layout the bank website produces:
+Builds the demo RHB bank statements in this folder (CSV and XLSX) with the exact layout the bank website produces:
 row 1 = "Balance of Account ... as at <date>", row 2 = blank, row 3 = "Current Account", row 4 = headers.
 Run:  python sample_data/build_samples.py
 """
@@ -14,7 +14,8 @@ HEADERS = ["Description", "Branch Code", "Debit (RM)", "Credit (RM)", "Sender`s 
 ROW1 = "Balance of Account 1230009876543 / Mandiri - Cust Ac as at 30/09/2026"
 
 # Expected result when the matching Teller receipts from `manage.py seed_demo` exist:
-#   GFP: 2235277A1, 611380310M, 77881234, 4400712, 88123456 | Typo: 99120045 | Manual review: 55302211 | Not found: 90019001
+#   GFP: 2235277A1, 611380310M, 77881234, 4400712, 8812 3456 | Typo: 99120045 | Amount differs: 55302211 | Not found: 90019001
+# Statement rows nobody claims (QR payment without reference, service charge, 1122334455) become Open Items.
 ROWS = [
     ["RPP INWARD INST TRF CR", "0100", "", "150.00", "MOH HAIKAL", "2235277A1", "", "MB26093000001"],
     ["DUITNOW QR POS CR", "0100", "", "80.50", "SITI AMINAH", "", "", "MB26093000002"],
@@ -30,7 +31,7 @@ ROWS = [
 
 
 def build() -> None:
-    with open(HERE / "mandiri_statement_2026-09-30.csv", "w", newline="", encoding="utf-8-sig") as handle:
+    with open(HERE / "rhb_statement_2026-09-30.csv", "w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
         writer.writerow([ROW1])
         writer.writerow([])
@@ -43,7 +44,7 @@ def build() -> None:
     sheet.append([ROW1]); sheet.append([]); sheet.append(["Current Account"]); sheet.append(HEADERS)
     for row in ROWS:
         sheet.append(row)
-    workbook.save(HERE / "mandiri_statement_2026-09-30.xlsx")
+    workbook.save(HERE / "rhb_statement_2026-09-30.xlsx")
     print("Sample statements written to", HERE)
 
 

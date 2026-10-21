@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% load ui static %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Dashboard</h1>
+  <div class="page-head__actions"><a class="btn" href="{% url 'cards:report' %}">{% icon "download" %} Generate report</a></div></div>
+{% include "cards/_dashboard.html" %}
+{% endblock %}
+{% block scripts %}<script src="{% static 'js/card_dashboard.js' %}?v=2" defer></script>{% endblock %}

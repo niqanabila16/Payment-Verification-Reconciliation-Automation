@@ -1,6 +1,11 @@
-{% extends "base.html" %}{% load ui %}
+{% extends "base.html" %}{% load ui static %}
 {% block title %}Correct receipt #{{ sub.pk }}{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Correct receipt #{{ sub.pk }}</h1></div>
+<div class="page-head"><h1>Correct receipt #{{ sub.pk }}</h1><div class="page-head__actions">{% teller_badge sub.match.match_status %}</div></div>
+{% if sub.match.match_status == "rejected" %}
+<div class="alert alert--danger" role="status">{% icon "x-circle" %}<div><span class="alert__title">Rejected by Finance</span><p class="mb-0">{{ sub.match.finance_note }}</p></div><span></span></div>
+{% endif %}
 <section class="card form-card">{% include "receipts/_form.html" %}</section>
+{% include "receipts/_duplicate_dialog.html" %}
 {% endblock %}
+{% block scripts %}<script src="{% static 'js/input_rules.js' %}?v=3" defer></script><script src="{% static 'js/receipt_edit.js' %}?v=1" defer></script>{% endblock %}
